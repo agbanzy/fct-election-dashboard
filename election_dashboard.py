@@ -1046,10 +1046,14 @@ def scrape_loop():
 # ─── Flask API ────────────────────────────────────────────────────────────────
 @app.route("/")
 def index():
-    return send_file(
-        os.path.join(os.path.dirname(os.path.abspath(__file__)), "dashboard.html"),
-        mimetype="text/html"
-    )
+    html_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "dashboard.html")
+    if os.path.exists(html_path):
+        return send_file(html_path, mimetype="text/html")
+    return jsonify({
+        "status": "ok",
+        "service": "FCT 2026 Election Dashboard API",
+        "version": "1.0",
+    })
 
 
 @app.route("/api/status")
