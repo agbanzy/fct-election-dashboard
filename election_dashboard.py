@@ -2419,15 +2419,21 @@ def _ensure_init():
     if _initialized:
         return
     _initialized = True
-    print("=" * 60)
-    print("  FCT 2026 Area Council Elections - Live Dashboard")
-    print("  Date: Saturday, 21 February 2026")
-    print("=" * 60)
-    init_db()
-    load_excel_data()
-    scraper_thread = threading.Thread(target=scrape_loop, daemon=True)
-    scraper_thread.start()
-    print("[OK] Background scraper started (every 2 minutes)")
+    try:
+        print("=" * 60)
+        print("  FCT 2026 Area Council Elections - Live Dashboard")
+        print("  Date: Saturday, 21 February 2026")
+        print("=" * 60)
+        init_db()
+        print("[OK] Database initialized")
+        load_excel_data()
+        print("[OK] Excel data loaded")
+        scraper_thread = threading.Thread(target=scrape_loop, daemon=True)
+        scraper_thread.start()
+        print("[OK] Background scraper started (every 2 minutes)")
+    except Exception as e:
+        print(f"[WARN] Init error (non-fatal): {e}")
+        traceback.print_exc()
 
 _ensure_init()
 
