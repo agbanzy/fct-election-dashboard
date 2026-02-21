@@ -52,15 +52,7 @@ ELECTION_TYPE_IDS = {
 }
 
 app = Flask(__name__)
-_frontend_url = os.getenv("FRONTEND_URL", "")
-_cors_origins = [o for o in [
-    _frontend_url,
-    "http://localhost:3000",
-    "http://localhost:3001",
-    "http://127.0.0.1:3000",
-    "http://127.0.0.1:3001",
-] if o]
-CORS(app, resources={r"/api/*": {"origins": _cors_origins}})
+CORS(app, resources={r"/api/*": {"origins": "*"}})
 
 scraper_status = {
     "last_scrape": None, "status": "idle", "error": None,
