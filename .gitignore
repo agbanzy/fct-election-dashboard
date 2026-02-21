@@ -1,0 +1,31 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+venv/
+.env
+
+# Node
+frontend/node_modules/
+frontend/.next/
+
+# SQLite (will be recreated by scraper)
+*.db-shm
+*.db-wal
+
+# OS
+.DS_Store
+Thumbs.db
+
+# IDE
+.vscode/
+.idea/
+
+# Claude
+.claude/
+collation-portal/
+fct_elections.db
+polling_agents_*.csv
+sms_send_progress*.json
+whatsapp_*
+dashboard.html

@@ -1,0 +1,285 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* ═══════════════════════════════════════════════════════════════
+   DARK THEME (default)
+   ═══════════════════════════════════════════════════════════════ */
+:root,
+.dark {
+  --bg: #0a0d14;
+  --card: #141821;
+  --card-hover: #1c2030;
+  --border: #1f2538;
+  --text: #e8eaf0;
+  --text-dim: #6b7280;
+  --green: #10b981;
+  --green-bg: rgba(16, 185, 129, 0.12);
+  --blue: #3b82f6;
+  --blue-bg: rgba(59, 130, 246, 0.12);
+  --orange: #f59e0b;
+  --orange-bg: rgba(245, 158, 11, 0.12);
+  --red: #ef4444;
+  --red-bg: rgba(239, 68, 68, 0.12);
+  --purple: #a78bfa;
+  --yellow: #fbbf24;
+  --cyan: #06b6d4;
+  --nigeria-green: #008751;
+  --chart-grid: #1f2538;
+  --chart-text: #6b7280;
+  --tooltip-bg: #141821;
+  --tooltip-border: #1f2538;
+  --header-from: #004d25;
+  --header-via: #00331a;
+  --header-to: #001a0d;
+  --shadow: rgba(0, 0, 0, 0.3);
+  --card-shadow: 0 1px 3px rgba(0, 0, 0, 0.2);
+  --hover-overlay: rgba(255, 255, 255, 0.03);
+  color-scheme: dark;
+}
+
+/* ═══════════════════════════════════════════════════════════════
+   LIGHT THEME
+   ═══════════════════════════════════════════════════════════════ */
+.light {
+  --bg: #f0f2f5;
+  --card: #ffffff;
+  --card-hover: #f8f9fb;
+  --border: #e2e8f0;
+  --text: #1a202c;
+  --text-dim: #718096;
+  --green: #059669;
+  --green-bg: rgba(5, 150, 105, 0.08);
+  --blue: #2563eb;
+  --blue-bg: rgba(37, 99, 235, 0.08);
+  --orange: #d97706;
+  --orange-bg: rgba(217, 119, 6, 0.08);
+  --red: #dc2626;
+  --red-bg: rgba(220, 38, 38, 0.08);
+  --purple: #7c3aed;
+  --yellow: #ca8a04;
+  --cyan: #0891b2;
+  --nigeria-green: #008751;
+  --chart-grid: #e2e8f0;
+  --chart-text: #718096;
+  --tooltip-bg: #ffffff;
+  --tooltip-border: #e2e8f0;
+  --header-from: #008751;
+  --header-via: #006e42;
+  --header-to: #005535;
+  --shadow: rgba(0, 0, 0, 0.08);
+  --card-shadow: 0 1px 3px rgba(0, 0, 0, 0.06), 0 1px 2px rgba(0, 0, 0, 0.04);
+  --hover-overlay: rgba(0, 0, 0, 0.02);
+  color-scheme: light;
+}
+
+/* ═══════════════════════════════════════════════════════════════
+   BASE STYLES
+   ═══════════════════════════════════════════════════════════════ */
+body {
+  background: var(--bg);
+  color: var(--text);
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Inter, Roboto,
+    sans-serif;
+  transition: background-color 0.3s ease, color 0.3s ease;
+}
+
+/* Theme transition on key elements */
+.bg-dashboard-card,
+.bg-dashboard-bg,
+.border-dashboard-border,
+aside,
+header,
+main {
+  transition: background-color 0.3s ease, border-color 0.3s ease, color 0.3s ease, box-shadow 0.3s ease;
+}
+
+/* Light mode card shadows */
+.light .bg-dashboard-card {
+  box-shadow: var(--card-shadow);
+}
+
+/* ─── Scrollbar Styling ─── */
+::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+::-webkit-scrollbar-track {
+  background: var(--bg);
+}
+::-webkit-scrollbar-thumb {
+  background: var(--border);
+  border-radius: 3px;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: var(--text-dim);
+}
+
+/* ─── Interactive Element Transitions ─── */
+a, button, input, select, textarea {
+  transition-property: background-color, border-color, box-shadow, color, transform, opacity;
+  transition-duration: 150ms;
+  transition-timing-function: ease;
+}
+
+/* ═══════════════════════════════════════════════════════════════
+   TV / FULLSCREEN MODE
+   ═══════════════════════════════════════════════════════════════ */
+.tv-mode {
+  font-size: 1.15em;
+}
+.tv-mode .stat-value {
+  font-size: 2.2rem !important;
+}
+.tv-mode .progress-bar-container {
+  height: 2rem;
+}
+.tv-mode .section-title {
+  font-size: 1.1rem;
+}
+
+/* ═══════════════════════════════════════════════════════════════
+   ANIMATIONS
+   ═══════════════════════════════════════════════════════════════ */
+
+/* Data Flash — green pulse on updates */
+@keyframes data-flash {
+  0% { background-color: rgba(16, 185, 129, 0.25); }
+  100% { background-color: transparent; }
+}
+.data-flash {
+  animation: data-flash 1.5s ease-out;
+}
+
+/* Skeleton Loading */
+@keyframes skeleton-pulse {
+  0%, 100% { opacity: 0.4; }
+  50% { opacity: 0.15; }
+}
+.skeleton {
+  background: linear-gradient(
+    90deg,
+    var(--border) 0%,
+    var(--card-hover) 50%,
+    var(--border) 100%
+  );
+  background-size: 200% 100%;
+  animation: skeleton-pulse 1.5s ease-in-out infinite;
+  border-radius: 6px;
+}
+
+/* Progress bar fill animation */
+@keyframes progress-fill {
+  from { width: 0; }
+}
+.animate-progress {
+  animation: progress-fill 1s ease-out;
+}
+
+/* Stagger children animations */
+.stagger-children > * {
+  opacity: 0;
+  animation: fadeInUp 0.4s ease-out forwards;
+}
+.stagger-children > *:nth-child(1) { animation-delay: 0ms; }
+.stagger-children > *:nth-child(2) { animation-delay: 60ms; }
+.stagger-children > *:nth-child(3) { animation-delay: 120ms; }
+.stagger-children > *:nth-child(4) { animation-delay: 180ms; }
+.stagger-children > *:nth-child(5) { animation-delay: 240ms; }
+.stagger-children > *:nth-child(6) { animation-delay: 300ms; }
+.stagger-children > *:nth-child(7) { animation-delay: 360ms; }
+.stagger-children > *:nth-child(8) { animation-delay: 420ms; }
+.stagger-children > *:nth-child(9) { animation-delay: 480ms; }
+.stagger-children > *:nth-child(10) { animation-delay: 540ms; }
+
+@keyframes fadeInUp {
+  0% { opacity: 0; transform: translateY(16px); }
+  100% { opacity: 1; transform: translateY(0); }
+}
+
+/* Number count-up feel */
+.animate-number {
+  animation: countUp 0.6s ease-out;
+}
+@keyframes countUp {
+  0% { opacity: 0; transform: translateY(6px); }
+  100% { opacity: 1; transform: translateY(0); }
+}
+
+/* Card hover lift */
+.card-hover {
+  transition: transform 0.2s ease, box-shadow 0.2s ease;
+}
+.card-hover:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 8px 25px var(--shadow);
+}
+
+/* Glowing border on active/live elements */
+.glow-border {
+  animation: borderGlow 2s ease-in-out infinite;
+}
+@keyframes borderGlow {
+  0%, 100% { border-color: rgba(16, 185, 129, 0.3); }
+  50% { border-color: rgba(16, 185, 129, 0.7); }
+}
+
+/* Tab slide indicator */
+.tab-active {
+  position: relative;
+}
+.tab-active::after {
+  content: "";
+  position: absolute;
+  bottom: 0;
+  left: 20%;
+  right: 20%;
+  height: 2px;
+  background: var(--green);
+  border-radius: 1px;
+  animation: scaleX 0.3s ease-out;
+}
+@keyframes scaleX {
+  from { transform: scaleX(0); }
+  to { transform: scaleX(1); }
+}
+
+/* ═══════════════════════════════════════════════════════════════
+   PRINT MODE
+   ═══════════════════════════════════════════════════════════════ */
+@media print {
+  body {
+    background: white !important;
+    color: black !important;
+  }
+  .no-print,
+  aside,
+  header {
+    display: none !important;
+  }
+  .bg-dashboard-card {
+    background: white !important;
+    border-color: #ddd !important;
+  }
+  .text-dim {
+    color: #666 !important;
+  }
+  .text-primary {
+    color: #111 !important;
+  }
+  * {
+    transition: none !important;
+    animation: none !important;
+  }
+}
+
+/* ═══════════════════════════════════════════════════════════════
+   REDUCED MOTION — respect user preference
+   ═══════════════════════════════════════════════════════════════ */
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
+}
