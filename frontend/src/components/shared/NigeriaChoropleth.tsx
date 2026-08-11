@@ -9,10 +9,27 @@
 
 import dynamic from "next/dynamic";
 import Link from "next/link";
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 
 import { useApiData } from "@/hooks/useApiData";
 import type { StateRow } from "@/lib/api";
+
+// CBM Connect (cbmnigeria.org) exposes a public, CORS-open grassroots-coverage
+// feed. Overriding the base is handy for staging.
+const CBM_API = process.env.NEXT_PUBLIC_CBM_API || "https://cbmnigeria.org";
+
+interface CbmStateCoverage {
+  code: string;
+  name: string;
+  members: number;
+  activeMembers: number;
+  lgaCount: number;
+  wardCount: number;
+  wardsWithMembers: number;
+  hasStateDirector: boolean;
+  wardsWithLeader: number;
+  wardLeaderPct: number;
+}
 
 const LeafletMap = dynamic(() => import("./NigeriaLeafletMap"), {
   ssr: false,
@@ -75,6 +92,32 @@ interface ScrapeStatus {
 
 export default function NigeriaChoropleth() {
   const [pick, setPick] = useState(COMMON_PICKS[0]);
+  // "election" colours states by winning party; "cbm" colours by CBM grassroots
+  // strength (member density) from cbmnigeria.org — the same map, two lenses.
+  const [source, setSource] = useState<"election" | "cbm">("election");
+  const [cbm, setCbm] = useState<CbmStateCoverage[] | null>(null);
+
+  useEffect(() => {
+    if (source !== "cbm" || cbm) return;
+    let live = true;
+    fetch(`${CBM_API}/api/coverage/national`)
+      .then((r) => r.json())
+      .then((d) => live && setCbm(Array.isArray(d?.data) ? d.data : []))
+      .catch(() => live && setCbm([]));
+    return () => {
+      live = false;
+    };
+  }, [source, cbm]);
+
+  // Map keys states by UPPER-cased HASC code (e.g. "LA"); coverage gives lower.
+  const cbmMetric = useMemo(() => {
+    const m = new Map<string, number>();
+    for (const s of cbm || []) m.set(String(s.code).toUpperCase(), s.members);
+    return m;
+  }, [cbm]);
+  const cbmTotal = useMemo(() => (cbm || []).reduce((a, s) => a + s.members, 0), [cbm]);
+  const cbmStatesWithData = useMemo(() => (cbm || []).filter((s) => s.members > 0).length, [cbm]);
+
   const { data: states } = useApiData<StateRow[]>("/api/states", 5 * 60_000);
   const { data: winners } = useApiData<WinnersResp>(
     `/api/analysis/winners?cycle=${pick.cycle}&type=${pick.type}`,
@@ -110,30 +153,60 @@ export default function NigeriaChoropleth() {
 
   return (
     <div className="space-y-3">
+      {/* Source toggle: election results vs CBM grassroots coverage. */}
       <div className="flex flex-wrap items-center gap-2">
-        <span className="text-xs text-dim">Color by:</span>
-        {COMMON_PICKS.map((p) => {
-          const active = p.label === pick.label;
-          return (
+        <span className="text-xs text-dim">Source:</span>
+        <div className="inline-flex rounded-full border border-dashboard-border bg-dashboard-card p-0.5">
+          {([
+            ["election", "Election results"],
+            ["cbm", "CBM coverage"],
+          ] as const).map(([key, label]) => (
             <button
-              key={p.label}
-              onClick={() => setPick(p)}
-              className={`text-xs rounded-full px-3 py-1 border transition-all ${
-                active
-                  ? "border-accent-green bg-accent-green/10 text-accent-green font-bold"
-                  : "border-dashboard-border bg-dashboard-card text-dim hover:text-primary"
+              key={key}
+              onClick={() => setSource(key)}
+              className={`text-xs rounded-full px-3 py-1 transition-all ${
+                source === key
+                  ? "bg-accent-green/15 text-accent-green font-bold"
+                  : "text-dim hover:text-primary"
               }`}
             >
-              {p.label}
+              {label}
             </button>
-          );
-        })}
-        {winners && (
+          ))}
+        </div>
+        {source === "cbm" && cbm && (
           <span className="text-[11px] text-dim ml-auto">
-            {winnersCount} state{winnersCount === 1 ? "" : "s"} with data
+            {cbmTotal.toLocaleString()} members · {cbmStatesWithData}/37 states
           </span>
         )}
       </div>
+
+      {source === "election" && (
+        <div className="flex flex-wrap items-center gap-2">
+          <span className="text-xs text-dim">Color by:</span>
+          {COMMON_PICKS.map((p) => {
+            const active = p.label === pick.label;
+            return (
+              <button
+                key={p.label}
+                onClick={() => setPick(p)}
+                className={`text-xs rounded-full px-3 py-1 border transition-all ${
+                  active
+                    ? "border-accent-green bg-accent-green/10 text-accent-green font-bold"
+                    : "border-dashboard-border bg-dashboard-card text-dim hover:text-primary"
+                }`}
+              >
+                {p.label}
+              </button>
+            );
+          })}
+          {winners && (
+            <span className="text-[11px] text-dim ml-auto">
+              {winnersCount} state{winnersCount === 1 ? "" : "s"} with data
+            </span>
+          )}
+        </div>
+      )}
 
       {liveStates.length > 0 && (
         <div className="flex items-center gap-3 rounded-lg border border-accent-red/40 bg-accent-red/10 px-4 py-2.5">
@@ -163,13 +236,23 @@ export default function NigeriaChoropleth() {
         </div>
       )}
 
-      <LeafletMap
-        mode="winner"
-        winnersByState={winners || {}}
-        statesByCode={statesByCode}
-        liveStateCodes={liveStateCodes}
-        title={`${pick.label} · click a state to expand`}
-      />
+      {source === "cbm" ? (
+        <LeafletMap
+          mode="metric"
+          metricByState={cbmMetric}
+          metricLabel="CBM members"
+          statesByCode={statesByCode}
+          title="CBM grassroots coverage · members per state · click a state to expand"
+        />
+      ) : (
+        <LeafletMap
+          mode="winner"
+          winnersByState={winners || {}}
+          statesByCode={statesByCode}
+          liveStateCodes={liveStateCodes}
+          title={`${pick.label} · click a state to expand`}
+        />
+      )}
 
       <div className="rounded-lg border border-dashboard-border bg-dashboard-card p-3">
         <div className="text-[11px] uppercase tracking-wider text-dim mb-2">
