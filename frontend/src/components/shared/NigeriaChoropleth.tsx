@@ -31,6 +31,20 @@ interface CbmStateCoverage {
   wardLeaderPct: number;
 }
 
+/** Rows from CBM's support-group activity feed — the same endpoint that colours
+ *  the internal dashboard's map, so both surfaces agree on "how active is here". */
+interface SgActivity {
+  code: string;
+  name: string;
+  members: number;
+  newMembers: number;
+  events: number;
+  groups: number;
+  reports: number;
+  score: number;
+  level: "high" | "moderate" | "attention";
+}
+
 const LeafletMap = dynamic(() => import("./NigeriaLeafletMap"), {
   ssr: false,
   loading: () => (
@@ -94,8 +108,32 @@ export default function NigeriaChoropleth() {
   const [pick, setPick] = useState(COMMON_PICKS[0]);
   // "election" colours states by winning party; "cbm" colours by CBM grassroots
   // strength (member density) from cbmnigeria.org — the same map, two lenses.
-  const [source, setSource] = useState<"election" | "cbm">("election");
+  const [source, setSource] = useState<"election" | "cbm" | "groups">("election");
   const [cbm, setCbm] = useState<CbmStateCoverage[] | null>(null);
+  const [sg, setSg] = useState<SgActivity[] | null>(null);
+
+  useEffect(() => {
+    if (source !== "groups" || sg) return;
+    let live = true;
+    fetch(`${CBM_API}/api/support-dashboard/activity?level=state`)
+      .then((r) => r.json())
+      .then((d) => live && setSg(Array.isArray(d?.data) ? d.data : []))
+      .catch(() => live && setSg([]));
+    return () => {
+      live = false;
+    };
+  }, [source, sg]);
+
+  // Activity is a 3-level judgement, not a magnitude, so it maps to the metric
+  // ramp by rank (attention/moderate/high) rather than to raw member counts.
+  const sgMetric = useMemo(() => {
+    const m = new Map<string, number>();
+    for (const s of sg || []) {
+      m.set(String(s.code).toUpperCase(), s.level === "high" ? 3 : s.level === "moderate" ? 2 : 1);
+    }
+    return m;
+  }, [sg]);
+  const sgGroups = useMemo(() => (sg || []).reduce((a, s) => a + (s.groups || 0), 0), [sg]);
 
   useEffect(() => {
     if (source !== "cbm" || cbm) return;
@@ -160,6 +198,7 @@ export default function NigeriaChoropleth() {
           {([
             ["election", "Election results"],
             ["cbm", "CBM coverage"],
+            ["groups", "Support groups"],
           ] as const).map(([key, label]) => (
             <button
               key={key}
@@ -177,6 +216,11 @@ export default function NigeriaChoropleth() {
         {source === "cbm" && cbm && (
           <span className="text-[11px] text-dim ml-auto">
             {cbmTotal.toLocaleString()} members · {cbmStatesWithData}/37 states
+          </span>
+        )}
+        {source === "groups" && sg && (
+          <span className="text-[11px] text-dim ml-auto">
+            {sgGroups.toLocaleString()} support groups · activity last 30 days
           </span>
         )}
       </div>
@@ -236,7 +280,15 @@ export default function NigeriaChoropleth() {
         </div>
       )}
 
-      {source === "cbm" ? (
+      {source === "groups" ? (
+        <LeafletMap
+          mode="metric"
+          metricByState={sgMetric}
+          metricLabel="Activity (1 needs attention · 3 high)"
+          statesByCode={statesByCode}
+          title="Support group activity · last 30 days · click a state to expand"
+        />
+      ) : source === "cbm" ? (
         <LeafletMap
           mode="metric"
           metricByState={cbmMetric}
