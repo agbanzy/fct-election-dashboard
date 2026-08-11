@@ -8,7 +8,7 @@
 import dynamic from "next/dynamic";
 import Link from "next/link";
 import { useParams } from "next/navigation";
-import { useMemo } from "react";
+import { useMemo, useState } from "react";
 
 import MethodologyDisclosure from "@/components/shared/MethodologyDisclosure";
 import { useApiData } from "@/hooks/useApiData";
@@ -60,6 +60,7 @@ interface CandidateRow {
 export default function StatePage() {
   const params = useParams<{ stateCode: string }>();
   const code = (params.stateCode || "").toUpperCase();
+  const [source, setSource] = useState<"election" | "cbm">("election");
 
   const { data: state } = useApiData<StateRow>(`/api/states/${code}`, 60_000);
   const { data: elections } = useApiData<ElectionRow[]>(`/api/elections?state=${code}`, 60_000);
@@ -107,19 +108,39 @@ export default function StatePage() {
       </header>
 
       <section>
-        <h2 className="text-sm font-bold uppercase tracking-wider text-dim mb-2">
-          {state?.name || code} map · LGAs &amp; wards
-          {recentElection && (
-            <span className="font-normal text-dim">
-              {" "}— {recentElection.election_type_label} {recentElection.cycle}
-            </span>
-          )}
-        </h2>
+        <div className="flex flex-wrap items-center justify-between gap-2 mb-2">
+          <h2 className="text-sm font-bold uppercase tracking-wider text-dim">
+            {state?.name || code} map · LGAs &amp; wards
+            {source === "election" && recentElection && (
+              <span className="font-normal text-dim">
+                {" "}— {recentElection.election_type_label} {recentElection.cycle}
+              </span>
+            )}
+            {source === "cbm" && <span className="font-normal text-dim"> — CBM member density</span>}
+          </h2>
+          <div className="inline-flex rounded-full border border-dashboard-border bg-dashboard-card p-0.5">
+            {([
+              ["election", "Election results"],
+              ["cbm", "CBM coverage"],
+            ] as const).map(([key, label]) => (
+              <button
+                key={key}
+                onClick={() => setSource(key)}
+                className={`text-xs rounded-full px-3 py-1 transition-all ${
+                  source === key ? "bg-accent-green/15 text-accent-green font-bold" : "text-dim hover:text-primary"
+                }`}
+              >
+                {label}
+              </button>
+            ))}
+          </div>
+        </div>
         <StateDrillMap
           stateCode={code}
           stateName={state?.name || code}
           electionId={recentElection?.election_id ?? null}
           live={isLive}
+          source={source}
         />
       </section>
 

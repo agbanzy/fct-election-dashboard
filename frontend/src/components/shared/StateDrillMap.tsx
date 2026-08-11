@@ -44,9 +44,26 @@ interface Props {
   electionId?: number | null;
   /** When true, render the "LIVE — counting" treatment for LGAs without a tally. */
   live?: boolean;
+  /** "election" colours LGAs by winning party; "cbm" by CBM member density. */
+  source?: "election" | "cbm";
 }
 
+interface CbmLga {
+  name: string;
+  members: number;
+  wardsWithLeader: number;
+  hasLgaDirector: boolean;
+}
+
+const CBM_API = process.env.NEXT_PUBLIC_CBM_API || "https://cbmnigeria.org";
 const norm = (s: string) => s.toLowerCase().replace(/[^a-z0-9]/g, "");
+
+// Green intensity ramp for CBM member density (mirrors NigeriaLeafletMap).
+function metricColor(value: number, max: number): string {
+  if (max === 0 || value === 0) return "#1f2538";
+  const t = Math.min(1, value / max);
+  return `rgb(${Math.round(16 + t * 16)}, ${Math.round(70 + t * 110)}, ${Math.round(40 + t * 50)})`;
+}
 
 function FitTo({ feature }: { feature: Feature | null }) {
   const map = useMap();
@@ -61,12 +78,22 @@ function FitTo({ feature }: { feature: Feature | null }) {
   return null;
 }
 
-export default function StateDrillMap({ stateCode, stateName, electionId, live }: Props) {
+export default function StateDrillMap({ stateCode, stateName, electionId, live, source = "election" }: Props) {
   const code = stateCode.toLowerCase();
+  const cbm = source === "cbm";
   const [lgas, setLgas] = useState<FeatureCollection | null>(null);
   const [wards, setWards] = useState<FeatureCollection | null>(null);
   const [missing, setMissing] = useState(false);
   const [byLga, setByLga] = useState<Record<string, LgaRow>>({});
+  // CBM member density per LGA (norm(name) → row), for the "CBM coverage" source.
+  const [cbmByLga, setCbmByLga] = useState<Record<string, CbmLga>>({});
+  const cbmMax = useMemo(() => Math.max(0, ...Object.values(cbmByLga).map((r) => r.members)), [cbmByLga]);
+  const cbmRef = useRef(cbmByLga);
+  cbmRef.current = cbmByLga;
+  const cbmMaxRef = useRef(cbmMax);
+  cbmMaxRef.current = cbmMax;
+  const cbmModeRef = useRef(cbm);
+  cbmModeRef.current = cbm;
   const [selectedLga, setSelectedLga] = useState<string | null>(null); // normalised name
   const lgaRef = useRef<L.GeoJSON | null>(null);
   const selRef = useRef<string | null>(null);
@@ -116,7 +143,41 @@ export default function StateDrillMap({ stateCode, stateName, electionId, live }
     };
   }, [electionId]);
 
+  // CBM coverage per LGA (member density) for the selected state.
+  useEffect(() => {
+    if (!cbm) {
+      setCbmByLga({});
+      return;
+    }
+    let ok = true;
+    fetch(`${CBM_API}/api/coverage/state/${code}`)
+      .then((r) => (r.ok ? r.json() : null))
+      .then((d) => {
+        if (!ok || !d) return;
+        const m: Record<string, CbmLga> = {};
+        for (const row of d.data || []) m[norm(row.name)] = row;
+        setCbmByLga(m);
+      })
+      .catch(() => {});
+    return () => {
+      ok = false;
+    };
+  }, [cbm, code]);
+
   const lgaStyle = (name: string): L.PathOptions => {
+    if (cbmModeRef.current) {
+      const c = cbmRef.current[norm(name)];
+      const fill = metricColor(c?.members || 0, cbmMaxRef.current);
+      const sel = selRef.current;
+      const isSel = sel === norm(name);
+      const dimmed = sel !== null && !isSel;
+      return {
+        fillColor: fill,
+        color: isSel ? "#10b981" : "#0c1226",
+        weight: isSel ? 3 : 1.2,
+        fillOpacity: dimmed ? 0.25 : 0.85,
+      };
+    }
     const row = byLgaRef.current[norm(name)];
     const fill = row?.winner_party ? getPartyColor(row.winner_party) : liveRef.current ? "#78350f" : "#1f2538";
     const sel = selRef.current;
@@ -134,11 +195,19 @@ export default function StateDrillMap({ stateCode, stateName, electionId, live }
   useEffect(() => {
     lgaRef.current?.setStyle((f) => lgaStyle(((f as Feature).properties as { name: string }).name));
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [selectedLga, byLga, live]);
+  }, [selectedLga, byLga, live, cbmByLga, cbm]);
 
   const onEachLga = (feature: Feature, layer: L.Layer) => {
     const name = (feature.properties as { name: string }).name;
     const tip = () => {
+      if (cbmModeRef.current) {
+        const c = cbmRef.current[norm(name)];
+        return (
+          `<div style="font-weight:700">${name}</div>` +
+          `<div style="opacity:.85">${(c?.members || 0).toLocaleString()} CBM members</div>` +
+          `<div style="opacity:.6;font-size:11px">${c?.wardsWithLeader || 0} wards with a leader${c?.hasLgaDirector ? " · LGA director ✓" : ""}</div>`
+        );
+      }
       const row = byLgaRef.current[norm(name)];
       if (row?.winner_party) {
         return (
@@ -182,6 +251,7 @@ export default function StateDrillMap({ stateCode, stateName, electionId, live }
   }, [wards, selectedLga]);
 
   const selectedRow = selectedLga ? byLga[selectedLga] : undefined;
+  const selectedCbm = selectedLga && cbm ? cbmByLga[selectedLga] : undefined;
   const selectedName = selectedFeature
     ? (selectedFeature.properties as { name: string }).name
     : null;
@@ -268,7 +338,26 @@ export default function StateDrillMap({ stateCode, stateName, electionId, live }
             <div className="text-[11px] text-dim mt-0.5">
               {selectedWards?.features.length ?? 0} wards
             </div>
-            {selectedRow?.standings?.length ? (
+            {cbm ? (
+              <div className="mt-3 space-y-2">
+                <div className="text-2xl font-extrabold text-primary">
+                  {(selectedCbm?.members || 0).toLocaleString()}
+                  <span className="ml-1 text-xs font-normal text-dim">CBM members</span>
+                </div>
+                <div className="text-[12px] text-dim">
+                  {selectedCbm?.wardsWithLeader || 0} wards with a ward leader
+                  {selectedCbm?.hasLgaDirector ? " · LGA director in place" : " · no LGA director"}
+                </div>
+                <a
+                  href={`https://cbmnigeria.org/structure`}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="inline-block text-xs font-bold text-accent-green underline hover:no-underline"
+                >
+                  View grassroots structure →
+                </a>
+              </div>
+            ) : selectedRow?.standings?.length ? (
               <div className="mt-3 space-y-1.5">
                 {selectedRow.standings.slice(0, 5).map((s) => (
                   <div key={s.party_code} className="flex items-center gap-2 text-[12px]">
