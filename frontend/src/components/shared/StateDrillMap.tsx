@@ -85,13 +85,32 @@ function metricColor(value: number, max: number): string {
 }
 
 /**
- * Reporting progress ramp — single hue, dark→bright, so "more reported" reads
- * as "more intense" without implying anything about who is winning. A party
- * palette here would be a lie: these are form counts, not votes.
+ * Reporting-progress ramp — one hue, monotone lightness, so "more reported"
+ * reads as "brighter". A party palette here would be a lie: these are result
+ * sheets published, not votes.
+ *
+ * Built in OKLCH at a fixed hue (210°) rather than interpolated in RGB, which
+ * drifted 77° across the ramp and made it a two-hue gradient. The teal is
+ * deliberately outside every party hue so a reporting map can't be misread as
+ * a party map, and the dark end clears the map surface at 2.25:1 so 0%
+ * reported stays distinguishable from an LGA the scraper hasn't reached.
  */
+const REPORTING_RAMP = ["#055762", "#0d7583", "#2293a3", "#35b2c5", "#47d2e8"];
+
 export function reportingColorAt(t: number): string {
   const c = Math.max(0, Math.min(1, t));
-  return `rgb(${Math.round(28 + c * 26)}, ${Math.round(38 + c * 148)}, ${Math.round(64 + c * 116)})`;
+  const pos = c * (REPORTING_RAMP.length - 1);
+  const i = Math.min(REPORTING_RAMP.length - 2, Math.floor(pos));
+  const f = pos - i;
+  const [a, b] = [REPORTING_RAMP[i], REPORTING_RAMP[i + 1]].map((h) => [
+    parseInt(h.slice(1, 3), 16),
+    parseInt(h.slice(3, 5), 16),
+    parseInt(h.slice(5, 7), 16),
+  ]);
+  // Short interpolation between validated steps keeps the ramp continuous
+  // without re-introducing the hue drift of a full-range RGB blend.
+  const mix = a.map((v, k) => Math.round(v + (b[k] - v) * f));
+  return `rgb(${mix[0]}, ${mix[1]}, ${mix[2]})`;
 }
 
 function FitTo({ feature }: { feature: Feature | null }) {
