@@ -22,6 +22,7 @@ from __future__ import annotations
 
 import json
 import logging
+import time
 from datetime import UTC, date, datetime, timedelta
 from typing import Any
 from zoneinfo import ZoneInfo
@@ -60,6 +61,11 @@ STRUCTURE_FRESHNESS = timedelta(days=30)   # historical elections: re-sync struc
 RESULTS_FRESHNESS_LIVE = timedelta(minutes=2)
 RESULTS_FRESHNESS_RECENT = timedelta(hours=6)
 RESULTS_FRESHNESS_HISTORICAL = timedelta(days=7)
+
+# Stop the PU walk after this many consecutive ward failures. When IReV is
+# down every ward costs a full timeout, and proving that 28 times over is a
+# waste of the tick.
+PU_FAILURE_CIRCUIT = 4
 
 # Nigeria is UTC+1 year-round (no DST). Every "what day is this election?"
 # question is a question about the Lagos calendar, never the UTC one.
@@ -438,8 +444,24 @@ def select_next_targets(session: Session, *, limit: int = 5) -> list[Election]:
     return list(session.scalars(stmt))
 
 
-def tick(session: Session, client: IrevClient, *, max_api_calls: int) -> dict[str, int]:
-    """Advance the sync queue, doing at most `max_api_calls` IReV calls."""
+def tick(
+    session: Session,
+    client: IrevClient,
+    *,
+    max_api_calls: int,
+    max_seconds: float | None = None,
+) -> dict[str, int]:
+    """Advance the sync queue, doing at most `max_api_calls` IReV calls.
+
+    `max_seconds` bounds wall-clock, which matters more than the call count
+    when upstream is degraded. The caller wraps the whole tick in a single
+    transaction, so nothing commits until it returns — on election night, with
+    every /pus call burning its full timeout, that meant 35-minute ticks and a
+    dashboard whose "last run" sat frozen while the daemon was in fact busy.
+    Bounding time keeps progress landing in the database incrementally.
+    """
+    started = time.monotonic()
+    deadline = started + max_seconds if max_seconds else None
     calls = 0
     counters = {
         "structure": 0,
@@ -451,6 +473,11 @@ def tick(session: Session, client: IrevClient, *, max_api_calls: int) -> dict[st
     targets = select_next_targets(session, limit=max_api_calls)
     for elec in targets:
         if calls >= max_api_calls:
+            break
+        if deadline is not None and time.monotonic() > deadline:
+            log.info(
+                "sync: tick hit its %ss budget after %s elections", max_seconds, counters["elections_touched"]
+            )
             break
 
         # Retry whenever the geography is genuinely absent, not just when the
@@ -486,7 +513,11 @@ def tick(session: Session, client: IrevClient, *, max_api_calls: int) -> dict[st
             and elec.state_id is not None
         ):
             n_wards, n_results = sync_election_pus(
-                session, client, elec, max_wards=max(1, max_api_calls - calls)
+                session,
+                client,
+                elec,
+                max_wards=max(1, max_api_calls - calls),
+                deadline=deadline,
             )
             counters["pu_wards"] += n_wards
             counters["pu_results"] += n_results
@@ -511,6 +542,7 @@ def sync_election_pus(
     election: Election,
     *,
     max_wards: int = 5,
+    deadline: float | None = None,
 ) -> tuple[int, int]:
     """Walk wards under this election's state, fetch /pus?ward=<id>, persist
     PU-level vote rows. Skips wards already covered.
@@ -534,8 +566,24 @@ def sync_election_pus(
     source = ensure_source(session, LIVE_SOURCE_NAME)
     processed = 0
     rows_inserted = 0
+    consecutive_failures = 0
     for ward in candidates:
         if processed >= max_wards:
+            break
+        if deadline is not None and time.monotonic() > deadline:
+            log.info(
+                "sync: pu walk hit its time budget after %s wards (election %s)",
+                processed, election.election_id,
+            )
+            break
+        # When IReV is down every ward costs a full timeout. Give up on the
+        # phase quickly rather than spending the whole tick proving the
+        # endpoint is still unavailable — the wards are still there next cycle.
+        if consecutive_failures >= PU_FAILURE_CIRCUIT:
+            log.warning(
+                "sync: pu walk opening circuit after %s consecutive failures (election %s)",
+                consecutive_failures, election.election_id,
+            )
             break
         already = session.scalar(
             select(func.count(ElectionResult.result_id))
@@ -551,6 +599,7 @@ def sync_election_pus(
             resp = client.pus_for_ward(election.irev_election_id, str(ward.irev_ward_oid))
             n = _persist_ward_pu_results(session, election, ward, resp, source_id=source.source_id)
             rows_inserted += n
+            consecutive_failures = 0
             log_phase(
                 session,
                 phase="pu",
@@ -560,7 +609,11 @@ def sync_election_pus(
                 message=f"ward={ward.ward_id} rows={n}",
             )
         except Exception as exc:  # noqa: BLE001
-            log.exception("sync: pu fetch failed e=%s w=%s", election.election_id, ward.ward_id)
+            consecutive_failures += 1
+            log.warning(
+                "sync: pu fetch failed e=%s w=%s: %s",
+                election.election_id, ward.ward_id, exc,
+            )
             log_phase(
                 session,
                 phase="pu",

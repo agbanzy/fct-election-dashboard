@@ -117,15 +117,31 @@ def _run_iteration(client: IrevClient, cfg: Config) -> int:
 
     burst = max(1.0, cfg.scraper_burst_factor)
 
+    # A tick is one transaction — nothing lands until it returns. Cap it well
+    # inside the cycle so a degraded upstream can't hold uncommitted work for
+    # tens of minutes while the dashboard reports a frozen "last run".
+    def _budget_seconds(interval: int) -> float:
+        return max(45.0, interval * 0.75)
+
     if decision.mode == "live":
         budget = int(30 * burst)
         with session_scope() as session:
-            counters = sync.tick(session, client, max_api_calls=budget)
+            counters = sync.tick(
+                session,
+                client,
+                max_api_calls=budget,
+                max_seconds=_budget_seconds(decision.interval_seconds),
+            )
         log.info("daemon: live tick %s (burst=%s)", counters, burst)
     elif decision.mode == "preflight":
         budget = int(15 * burst)
         with session_scope() as session:
-            counters = sync.tick(session, client, max_api_calls=budget)
+            counters = sync.tick(
+                session,
+                client,
+                max_api_calls=budget,
+                max_seconds=_budget_seconds(decision.interval_seconds),
+            )
         log.info("daemon: preflight tick %s (burst=%s)", counters, burst)
     else:
         # Idle — drain the queue. Defaults to 20 calls per 30 min cycle
@@ -135,7 +151,9 @@ def _run_iteration(client: IrevClient, cfg: Config) -> int:
         if depth["pending_total"] > 0:
             budget = int(20 * burst)
             with session_scope() as session:
-                counters = sync.tick(session, client, max_api_calls=budget)
+                counters = sync.tick(
+                    session, client, max_api_calls=budget, max_seconds=600.0
+                )
             log.info("daemon: idle tick %s (burst=%s)", counters, burst)
             # Shorten sleep proportional to burst factor.
             sleep = max(60, int(1800 / burst))
