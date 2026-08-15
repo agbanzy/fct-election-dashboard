@@ -60,7 +60,12 @@ export default function NewsFeed({
   limit?: number;
   title?: string;
 }) {
-  const [onlyRelevant, setOnlyRelevant] = useState(Boolean(focus));
+  // `focus` arrives a tick late (it comes from /api/calendar/next), so seeding
+  // useState with it would lock in the pre-load value of `false` and the
+  // election-only default would never apply. Derive instead, and let an
+  // explicit user choice win once one is made.
+  const [override, setOverride] = useState<boolean | null>(null);
+  const onlyRelevant = override ?? Boolean(focus);
 
   const qs = new URLSearchParams({ limit: String(limit) });
   if (focus) qs.set("focus", focus);
@@ -86,7 +91,7 @@ export default function NewsFeed({
         {focus && (
           <button
             type="button"
-            onClick={() => setOnlyRelevant((v) => !v)}
+            onClick={() => setOverride(!onlyRelevant)}
             aria-pressed={onlyRelevant}
             className={`shrink-0 text-[11px] px-2 py-1 rounded border transition-colors ${
               onlyRelevant
