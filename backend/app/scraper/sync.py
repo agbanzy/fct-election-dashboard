@@ -694,21 +694,30 @@ def _persist_ward_pu_results(
             party = resolve_party(session, code=code, cycle=election.cycle, autocreate=True)
             if party is None:
                 continue
-            session.add(
-                ElectionResult(
-                    election_id=election.election_id,
-                    pu_id=pu.pu_id,
-                    # Denormalised so /by-lga can group without walking
-                    # pu → ward → lga. Leaving it NULL meant the endpoint —
-                    # which filters on lga_id IS NOT NULL — returned nothing
-                    # even when PU votes existed, so the state map had no
-                    # geography to colour no matter how well the walk ran.
-                    lga_id=ward.lga_id,
-                    state_id=election.state_id,
-                    aggregation="pu",
-                    party_id=party.party_id,
-                    votes=count,
-                    source_id=source_id,
+            # Upsert, never append. The walk revisits wards to refresh them, so
+            # a plain insert restated the same polling unit as extra votes —
+            # Osun's total doubled to 808 across the same two units. A revisit
+            # carries the authoritative count, so it replaces rather than adds.
+            stmt = pg_insert(ElectionResult).values(
+                election_id=election.election_id,
+                pu_id=pu.pu_id,
+                # Denormalised so /by-lga can group without walking
+                # pu → ward → lga. Leaving it NULL meant the endpoint —
+                # which filters on lga_id IS NOT NULL — returned nothing
+                # even when PU votes existed, so the state map had no
+                # geography to colour no matter how well the walk ran.
+                lga_id=ward.lga_id,
+                state_id=election.state_id,
+                aggregation="pu",
+                party_id=party.party_id,
+                votes=count,
+                source_id=source_id,
+            )
+            session.execute(
+                stmt.on_conflict_do_update(
+                    index_elements=["election_id", "pu_id", "party_id", "aggregation"],
+                    index_where=ElectionResult.pu_id.isnot(None),
+                    set_={"votes": stmt.excluded.votes, "source_id": stmt.excluded.source_id},
                 )
             )
             inserted += 1
