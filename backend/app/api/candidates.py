@@ -14,7 +14,14 @@ bp = Blueprint("candidates", __name__, url_prefix="/api/candidates")
 
 @bp.get("")
 def list_candidates():
-    election_id = request.args.get("election", type=int)
+    # Accept both spellings. Responses carry `election_id`, so that is what
+    # callers reach for — and the old name-only lookup meant `?election_id=242`
+    # was silently ignored, quietly returning every candidate in the country
+    # rather than an empty set or an error. A filter that no-ops is worse than
+    # one that rejects: the caller believes it applied.
+    election_id = request.args.get("election_id", type=int) or request.args.get(
+        "election", type=int
+    )
     party_code = request.args.get("party")
     state_code = request.args.get("state")
     cycle = request.args.get("cycle", type=int)

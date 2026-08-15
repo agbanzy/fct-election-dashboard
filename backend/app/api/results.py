@@ -13,7 +13,11 @@ bp = Blueprint("results", __name__, url_prefix="/api/results")
 
 @bp.get("")
 def list_results():
-    election_id = request.args.get("election", type=int)
+    # Both spellings — see candidates.py. `?election_id=` silently no-opped
+    # here too, so a request for one election's rows returned every election's.
+    election_id = request.args.get("election_id", type=int) or request.args.get(
+        "election", type=int
+    )
     state_code = request.args.get("state")
     aggregation = request.args.get("aggregation")
     limit = min(request.args.get("limit", default=200, type=int), 5000)
