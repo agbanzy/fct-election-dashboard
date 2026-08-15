@@ -123,6 +123,35 @@ class PollingUnit(Base):
     ward: Mapped[Ward] = relationship(back_populates="polling_units")
 
 
+class ElectionWardSync(Base):
+    """When each ward was last walked for polling-unit data, per election.
+
+    Ward coverage used to be inferred from whether the ward had produced any
+    vote rows. On an election where IReV publishes result sheets but no
+    machine-readable votes that test is never satisfied, so the walk re-fetched
+    the same handful of wards every tick and never reached the rest of the
+    state. Recording the walk itself is what makes progress monotonic, and
+    ordering by `walked_at` gives refresh for free — the least recently seen
+    ward is always next.
+    """
+
+    __tablename__ = "election_ward_sync"
+
+    election_id: Mapped[int] = mapped_column(
+        BigInteger, ForeignKey("elections.election_id"), primary_key=True
+    )
+    ward_id: Mapped[int] = mapped_column(
+        BigInteger, ForeignKey("wards.ward_id"), primary_key=True
+    )
+    walked_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), nullable=False
+    )
+    pu_count: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+    form_count: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+
+    __table_args__ = (Index("ix_ward_sync_election_walked", "election_id", "walked_at"),)
+
+
 class PollingUnitForm(Base):
     """One published EC8A result sheet, per (election, polling unit).
 

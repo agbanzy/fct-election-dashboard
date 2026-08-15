@@ -27,7 +27,7 @@ from datetime import UTC, date, datetime, timedelta
 from typing import Any
 from zoneinfo import ZoneInfo
 
-from sqlalchemy import func, select
+from sqlalchemy import and_, func, select
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.orm import Session
 
@@ -36,8 +36,8 @@ from app.models import (
     Election,
     ElectionCalendar,
     ElectionResult,
+    ElectionWardSync,
     Lga,
-    PollingUnit,
     PollingUnitForm,
     State,
     Ward,
@@ -555,10 +555,25 @@ def sync_election_pus(
         return 0, 0
 
     # Must have the object-id: /pus rejects the integer ward_id with a 400.
+    #
+    # Ordered by when we last walked each ward, never-walked first. Coverage
+    # used to be inferred from "has this ward produced vote rows", which is
+    # never true on an election IReV publishes only as scanned sheets — so the
+    # walk re-fetched the same first wards every tick and never reached the
+    # rest of the state. Least-recently-walked ordering makes progress
+    # monotonic and refreshes the oldest wards once the state is covered.
     stmt = (
         select(Ward)
         .join(Lga, Lga.lga_id == Ward.lga_id)
+        .outerjoin(
+            ElectionWardSync,
+            and_(
+                ElectionWardSync.ward_id == Ward.ward_id,
+                ElectionWardSync.election_id == election.election_id,
+            ),
+        )
         .where(Lga.state_id == election.state_id, Ward.irev_ward_oid.isnot(None))
+        .order_by(ElectionWardSync.walked_at.asc().nullsfirst())
         .limit(max_wards * 4)
     )
     candidates = list(session.scalars(stmt))
@@ -587,21 +602,14 @@ def sync_election_pus(
                 consecutive_failures, election.election_id,
             )
             break
-        already = session.scalar(
-            select(func.count(ElectionResult.result_id))
-            .join(PollingUnit, PollingUnit.pu_id == ElectionResult.pu_id)
-            .where(
-                ElectionResult.election_id == election.election_id,
-                PollingUnit.ward_id == ward.ward_id,
-            )
-        ) or 0
-        if already > 0:
-            continue
         try:
             resp = client.pus_for_ward(election.irev_election_id, str(ward.irev_ward_oid))
             n = _persist_ward_pu_results(session, election, ward, resp, source_id=source.source_id)
             rows_inserted += n
             consecutive_failures = 0
+            # Stamp only on success, so a failed ward stays at the front of the
+            # queue instead of being treated as covered.
+            _stamp_ward_walk(session, election, ward, resp)
             log_phase(
                 session,
                 phase="pu",
@@ -707,6 +715,39 @@ def _persist_ward_pu_results(
     if inserted:
         session.flush()
     return inserted
+
+
+def _stamp_ward_walk(
+    session: Session,
+    election: Election,
+    ward: Ward,
+    resp: Any,
+) -> None:
+    """Record that this ward was walked, with what it held."""
+    data = resp.get("data") if isinstance(resp, dict) else resp
+    rows = data if isinstance(data, list) else []
+    forms = sum(
+        1
+        for p in rows
+        if isinstance(p, dict) and isinstance(p.get("document"), dict) and p["document"].get("url")
+    )
+    stmt = pg_insert(ElectionWardSync).values(
+        election_id=election.election_id,
+        ward_id=ward.ward_id,
+        walked_at=func.now(),
+        pu_count=len(rows),
+        form_count=forms,
+    )
+    session.execute(
+        stmt.on_conflict_do_update(
+            index_elements=["election_id", "ward_id"],
+            set_={
+                "walked_at": func.now(),
+                "pu_count": stmt.excluded.pu_count,
+                "form_count": stmt.excluded.form_count,
+            },
+        )
+    )
 
 
 def _upsert_pu_form(
