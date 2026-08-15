@@ -85,9 +85,15 @@ class IrevClient:
         self.bucket = TokenBucket(capacity=requests_per_minute, refill_seconds=60.0)
         self._session = requests.Session()
 
+        # Election night is exactly when IReV gets slow, and exactly when we
+        # can least afford to wait: total=4 + backoff_factor=5 against a 90s
+        # read timeout blocks a single call for ~6.6 minutes, which wedges the
+        # whole daemon tick behind one unlucky ward. Every phase here is
+        # re-entrant, so failing fast and picking the work up next cycle beats
+        # retrying patiently in-line.
         retries = Retry(
-            total=4,
-            backoff_factor=5,
+            total=2,
+            backoff_factor=1,
             status_forcelist=[429, 500, 502, 503, 504],
             allowed_methods=["GET"],
             raise_on_status=False,
@@ -164,4 +170,17 @@ class IrevClient:
         return self.get(f"/elections/{election_id}/lga/state/{state_id}")
 
     def pus_for_ward(self, election_id: str, ward_id: str) -> Any:
-        return self.get(f"/elections/{election_id}/pus", params={"ward": ward_id})
+        """Polling units for one ward.
+
+        `ward_id` must be the ward's Mongo `_id`; the integer ward_id is
+        rejected with a 400.
+
+        Tight timeout on purpose: this is the highest-volume call in the walk
+        (one per ward, 332 for Osun alone) and the first to degrade when INEC
+        is under load. The payload is small, so a slow response means an
+        overloaded upstream, not a big transfer — drop it and take the ward
+        again next tick rather than holding the daemon.
+        """
+        return self.get(
+            f"/elections/{election_id}/pus", params={"ward": ward_id}, timeout=25
+        )
