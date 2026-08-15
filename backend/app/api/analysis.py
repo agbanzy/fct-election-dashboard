@@ -20,8 +20,26 @@ from app.analysis.swing import compute_swings
 from app.db import session_scope
 from app.models import Candidate, Election, ElectionResult, Party, ScrapeLog, State
 from app.scraper.election_types import LABELS as TYPE_LABELS
+from app.scraper.sync import today_wat
 
 bp = Blueprint("analysis", __name__, url_prefix="/api/analysis")
+
+
+def _concluded_only(stmt):
+    """Restrict an Election-joined query to races that have finished.
+
+    A cumulative total must never absorb an election still being counted. On
+    polling day the live race contributes whatever fragment has been
+    transcribed so far — Osun's "past results" block was carrying today's 338
+    stray votes while the caption above it promised today was excluded.
+
+    Excludes by status and by date, since a race can be mid-count without its
+    status having been updated yet.
+    """
+    return stmt.where(
+        Election.status != "live",
+        (Election.election_date.is_(None)) | (Election.election_date < today_wat()),
+    )
 
 
 @bp.get("/turnout")
@@ -227,6 +245,7 @@ def party_totals():
             stmt = stmt.join(State, State.state_id == ElectionResult.state_id).where(
                 State.code == state_code.upper()
             )
+        stmt = _concluded_only(stmt)
         stmt = stmt.group_by(Party.party_id, Party.code, Party.name, Party.color_hex)
         stmt = stmt.order_by(func.sum(ElectionResult.votes).desc().nullslast())
 
@@ -267,6 +286,7 @@ def party_totals():
             src_stmt = src_stmt.join(
                 State, State.state_id == ElectionResult.state_id
             ).where(State.code == state_code.upper())
+        src_stmt = _concluded_only(src_stmt)
         src_stmt = src_stmt.group_by(
             Election.election_id,
             Election.election_type,
