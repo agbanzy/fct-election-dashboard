@@ -72,6 +72,18 @@ def now():
                     ElectionResult.aggregation == "pu",
                 )
             ) or 0
+
+            # How many polling units actually carry transcribed votes. INEC
+            # publishes result sheets as images, so any vote rows we hold for a
+            # live election are fragmentary — a handful of units out of
+            # thousands. Reporting a "leader" off that is misinformation, so the
+            # caller needs the coverage, not just the totals.
+            pus_with_votes = session.scalar(
+                select(func.count(func.distinct(ElectionResult.pu_id))).where(
+                    ElectionResult.election_id == elec.election_id,
+                    ElectionResult.pu_id.is_not(None),
+                )
+            ) or 0
             if not have_pu:
                 aggregation = session.scalar(
                     select(ElectionResult.aggregation)
@@ -141,6 +153,13 @@ def now():
                     "aggregation": aggregation,
                     "total_votes": sum(t["votes"] for t in tallies),
                     "tallies": tallies,
+                    # Consumers must gate any leader claim on this, not on
+                    # tallies being non-empty.
+                    "tally_coverage": {
+                        "pus_with_votes": pus_with_votes,
+                        "reported_pus": uploaded,
+                        "pct": round(pus_with_votes / uploaded, 4) if uploaded else 0.0,
+                    },
                     "results_synced_at": elec.results_synced_at.isoformat()
                     if elec.results_synced_at
                     else None,

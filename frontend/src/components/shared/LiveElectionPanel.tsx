@@ -31,8 +31,20 @@ interface LiveElection {
   reporting: { expected_pus: number; uploaded_pus: number; pct: number };
   total_votes: number;
   tallies: Tally[];
+  tally_coverage?: { pus_with_votes: number; reported_pus: number; pct: number };
   results_synced_at: string | null;
 }
+
+/**
+ * Minimum share of reported polling units that must carry transcribed votes
+ * before any total is shown.
+ *
+ * INEC publishes result sheets as scanned images, so a live election's vote
+ * rows are fragmentary — Osun sat at 404 votes across 2,266 reported units
+ * while the panel announced a party "leading on 60% reporting". Below this
+ * threshold the numbers describe a rounding error, not an election.
+ */
+const MIN_TALLY_COVERAGE = 0.2;
 
 interface LiveNow {
   live: boolean;
@@ -85,7 +97,10 @@ export default function LiveElectionPanel({
     <div className="space-y-3">
       {elections.map((e) => {
         const { expected_pus, uploaded_pus, pct } = e.reporting;
-        const counting = e.tallies.length > 0;
+        // Having tallies is not the same as having enough of them to publish.
+        const coverage = e.tally_coverage?.pct ?? 0;
+        const counting = e.tallies.length > 0 && coverage >= MIN_TALLY_COVERAGE;
+        const fragmentary = e.tallies.length > 0 && !counting;
         const leader = counting ? e.tallies[0] : null;
 
         return (
@@ -145,6 +160,14 @@ export default function LiveElectionPanel({
                 as vote counts — party totals appear here only once the sheets
                 are transcribed, so this figure tracks{" "}
                 <span className="italic">reporting progress</span>, not results.
+                {fragmentary && (
+                  <>
+                    {" "}
+                    Votes have been read from{" "}
+                    {formatNumber(e.tally_coverage?.pus_with_votes ?? 0)} of them
+                    — far too few to stand for a total, so none is shown.
+                  </>
+                )}
               </div>
             )}
 
@@ -192,7 +215,9 @@ export default function LiveElectionPanel({
                 </ul>
 
                 <div className="text-[11px] text-dim mt-3 pt-2 border-t border-accent-red/20">
-                  {formatNumber(e.total_votes)} votes counted
+                  {formatNumber(e.total_votes)} votes counted from{" "}
+                  {formatNumber(e.tally_coverage?.pus_with_votes ?? 0)} of{" "}
+                  {formatNumber(uploaded_pus)} reported polling units
                   {leader && pct < 0.95 && (
                     <>
                       {" · "}
