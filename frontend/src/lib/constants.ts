@@ -17,6 +17,15 @@
  */
 export const PARTY_COLORS: Record<string, string> = {
   APC: "#3580dd",
+  // Accord. Its INEC code really is the single letter "A", and on the 2026
+  // Osun ballot it is APC's main rival — PDP is not on that ballot at all —
+  // so it needs a real colour rather than the grey fallback. Amber is the
+  // most distinct hue left against the existing twelve, and it separates
+  // cleanly from APC blue, which is the pairing that actually decides
+  // whether an Osun map is readable. Its weakest pair is against PDP red,
+  // which cannot co-occur here; where it can, the map's direct labels carry
+  // identity anyway.
+  A: "#b2790c",
   PDP: "#dc403b",
   ADC: "#a058d5",
   LP: "#479449",
@@ -33,6 +42,7 @@ export const PARTY_COLORS: Record<string, string> = {
 
 /** Party full names, for legend and tooltip text. */
 export const PARTY_NAMES: Record<string, string> = {
+  A: "Accord",
   APC: "All Progressives Congress",
   PDP: "Peoples Democratic Party",
   ADC: "African Democratic Congress",
