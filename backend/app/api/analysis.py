@@ -19,6 +19,7 @@ from app.analysis.enp import effective_number_of_parties
 from app.analysis.swing import compute_swings
 from app.db import session_scope
 from app.models import Candidate, Election, ElectionResult, Party, ScrapeLog, State
+from app.scraper.election_types import LABELS as TYPE_LABELS
 
 bp = Blueprint("analysis", __name__, url_prefix="/api/analysis")
 
@@ -245,7 +246,48 @@ def party_totals():
                     "elections_count": int(n_elections),
                 }
             )
-        return jsonify({"grand_total": grand_total, "parties": out})
+        # Name the races actually behind these totals. Callers were showing a
+        # bare count next to a cumulative percentage, which on polling day
+        # reads as the live result — the UI needs to be able to say which
+        # concluded races produced the number.
+        src_stmt = (
+            select(
+                Election.election_id,
+                Election.election_type,
+                Election.cycle,
+                Election.election_date,
+            )
+            .join(ElectionResult, ElectionResult.election_id == Election.election_id)
+        )
+        if cycle:
+            src_stmt = src_stmt.where(Election.cycle == cycle)
+        if etype:
+            src_stmt = src_stmt.where(Election.election_type == etype)
+        if state_code:
+            src_stmt = src_stmt.join(
+                State, State.state_id == ElectionResult.state_id
+            ).where(State.code == state_code.upper())
+        src_stmt = src_stmt.group_by(
+            Election.election_id,
+            Election.election_type,
+            Election.cycle,
+            Election.election_date,
+        ).order_by(Election.election_date.desc().nullslast())
+
+        sources = [
+            {
+                "election_id": eid,
+                "election_type": etype_,
+                "election_type_label": TYPE_LABELS.get(etype_, etype_),
+                "cycle": cyc,
+                "election_date": edate.isoformat() if edate else None,
+            }
+            for eid, etype_, cyc, edate in session.execute(src_stmt).all()
+        ]
+
+        return jsonify(
+            {"grand_total": grand_total, "parties": out, "sources": sources}
+        )
 
 
 @bp.get("/winners")

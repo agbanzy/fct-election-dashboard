@@ -33,6 +33,13 @@ interface LgaRow {
 
 interface PartyTotalsResp {
   grand_total: number;
+  /** Elections that actually contributed votes to these totals. */
+  sources?: {
+    election_id: number;
+    election_type_label: string;
+    cycle: number;
+    election_date: string | null;
+  }[];
   parties: {
     party_id: number;
     party_code: string;
@@ -99,16 +106,16 @@ export default function StatePage() {
   }, [recentElection]);
 
   // Name the races behind the cumulative block so "55.2% APC" can't be read
-  // as today's number. Anything dated before today has concluded.
-  const historicalRaces = useMemo(() => {
-    const today = new Date().toISOString().slice(0, 10);
-    return (elections || [])
-      .filter((e) => e.election_date && (e.election_date as string) < today)
-      .slice()
-      .sort((a, b) => (b.election_date as string).localeCompare(a.election_date as string))
-      .map((e) => `${e.election_type_label} ${e.cycle}`)
-      .slice(0, 4);
-  }, [elections]);
+  // as today's number. These come from the API's `sources` — the elections
+  // that actually contributed votes. Listing every past race instead would
+  // contradict the count, since most have no published results.
+  const historicalRaces = useMemo(
+    () =>
+      (partyTotals?.sources || [])
+        .map((s) => `${s.election_type_label} ${s.cycle}`)
+        .slice(0, 4),
+    [partyTotals],
+  );
 
   return (
     <div className="space-y-6">
@@ -168,10 +175,9 @@ export default function StatePage() {
             Past results · {state?.name || code}
           </h2>
           <p className="text-[11px] text-dim mb-2">
-            Cumulative across {partyTotals.parties[0]?.elections_count ?? 0}{" "}
-            previously concluded {(partyTotals.parties[0]?.elections_count ?? 0) === 1 ? "race" : "races"} with
-            published results
-            {historicalRaces.length > 0 && ` (${historicalRaces.join(", ")})`}.
+            {historicalRaces.length > 0
+              ? `Cumulative across ${historicalRaces.join(", ")}.`
+              : "Cumulative across concluded races with published results."}
             {isLive && " Today's election is not included — see the live panel above."}
           </p>
           <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-6 gap-2">
