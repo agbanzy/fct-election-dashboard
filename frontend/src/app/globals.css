@@ -304,3 +304,28 @@ a, button, input, select, textarea {
 .leaflet-tooltip.ng-map-tip.leaflet-tooltip-bottom::before {
   border-bottom-color: var(--tooltip-border);
 }
+
+/*
+ * Winning-party code drawn onto each LGA. This is the accessible channel for
+ * winner identity — party fills cannot be made colourblind-safe (PDP red vs
+ * LP green is the deuteranopia collision, and both hues are fixed real-world
+ * identities), so the text must stay legible over any fill. Hence the dark
+ * halo rather than a coloured label.
+ */
+.leaflet-div-icon.ng-map-label {
+  background: transparent;
+  border: none;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  pointer-events: none;
+}
+.leaflet-div-icon.ng-map-label span {
+  font-size: 10px;
+  font-weight: 800;
+  letter-spacing: 0.03em;
+  color: #fff;
+  text-shadow:
+    0 0 3px rgba(0, 0, 0, 0.95),
+    0 1px 2px rgba(0, 0, 0, 0.9);
+}

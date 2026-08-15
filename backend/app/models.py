@@ -123,6 +123,41 @@ class PollingUnit(Base):
     ward: Mapped[Ward] = relationship(back_populates="polling_units")
 
 
+class PollingUnitForm(Base):
+    """One published EC8A result sheet, per (election, polling unit).
+
+    INEC's 2026 IReV publishes result sheets as scanned images and serves no
+    machine-readable votes, so form presence is the only per-polling-unit
+    signal available on election night. Aggregated up to LGA it is what drives
+    the reporting-progress view; the URL is the input to transcription.
+    """
+
+    __tablename__ = "polling_unit_forms"
+
+    form_id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
+    election_id: Mapped[int] = mapped_column(
+        BigInteger, ForeignKey("elections.election_id"), nullable=False
+    )
+    pu_id: Mapped[int] = mapped_column(
+        BigInteger, ForeignKey("polling_units.pu_id"), nullable=False
+    )
+    lga_id: Mapped[int | None] = mapped_column(
+        BigInteger, ForeignKey("lgas.lga_id"), nullable=True
+    )
+    document_url: Mapped[str | None] = mapped_column(Text, nullable=True)
+    first_seen_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), nullable=False
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), nullable=False
+    )
+
+    __table_args__ = (
+        UniqueConstraint("election_id", "pu_id", name="uq_pu_form_election_pu"),
+        Index("ix_pu_form_election_lga", "election_id", "lga_id"),
+    )
+
+
 class Party(Base):
     __tablename__ = "parties"
 

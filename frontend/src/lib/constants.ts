@@ -1,18 +1,62 @@
+/**
+ * Party colours.
+ *
+ * Hue is fixed by real-world party identity — APC blue, PDP red, LP green — so
+ * these are not free slots in a categorical palette and must not be re-hued to
+ * satisfy a validator. What *was* free is lightness and chroma: the previous
+ * values were Material 800 steps, which on the #0c1226 map surface put four
+ * parties under 3:1 contrast and pushed three outside the dark-mode lightness
+ * band. Each hue is now snapped to OKLCH L≈0.60, C≥0.13, which clears the
+ * lightness, chroma and contrast checks with the hue left untouched.
+ *
+ * CVD separation cannot be cleared by colour here and never will be: PDP red
+ * against LP green is the textbook deuteranopia collision, and both are real
+ * party identities. That is why every surface using these MUST carry secondary
+ * encoding — the party code as a direct label on the map, in the legend, and in
+ * tooltips — so identity is never colour-alone. See StateDrillMap.
+ */
 export const PARTY_COLORS: Record<string, string> = {
-  APC: "#1565c0",
-  PDP: "#c62828",
-  ADC: "#6a1b9a",
-  LP: "#2e7d32",
-  NNPP: "#e65100",
-  SDP: "#ad1457",
-  APGA: "#00695c",
-  AA: "#4527a0",
-  ADP: "#bf360c",
-  APM: "#00838f",
-  ZLP: "#33691e",
-  YPP: "#795548",
-  default: "#455a64",
+  APC: "#3580dd",
+  PDP: "#dc403b",
+  ADC: "#a058d5",
+  LP: "#479449",
+  NNPP: "#d74b01",
+  SDP: "#d44176",
+  APGA: "#139483",
+  AA: "#7b69e5",
+  ADP: "#d54c28",
+  APM: "#10919e",
+  ZLP: "#569241",
+  YPP: "#c0623f",
+  default: "#7b8794",
 };
+
+/** Party full names, for legend and tooltip text. */
+export const PARTY_NAMES: Record<string, string> = {
+  APC: "All Progressives Congress",
+  PDP: "Peoples Democratic Party",
+  ADC: "African Democratic Congress",
+  LP: "Labour Party",
+  NNPP: "New Nigeria Peoples Party",
+  SDP: "Social Democratic Party",
+  APGA: "All Progressives Grand Alliance",
+  AA: "Action Alliance",
+  ADP: "Action Democratic Party",
+  APM: "Allied Peoples Movement",
+  ZLP: "Zenith Labour Party",
+  YPP: "Young Progressives Party",
+};
+
+/**
+ * Map states that are not a party. Kept distinct from PARTY_COLORS so a
+ * "counting" LGA can never be mistaken for a party's fill.
+ */
+export const MAP_STATE_COLORS = {
+  /** Election is live and this LGA has no tally yet. */
+  counting: "#a16207",
+  /** No result recorded and nothing in progress. */
+  noData: "#2a3348",
+} as const;
 
 export const ACCENT_COLORS = {
   green: "#10b981",
@@ -52,4 +96,8 @@ export const NAV_ITEMS = [
 
 export function getPartyColor(party: string): string {
   return PARTY_COLORS[party] || PARTY_COLORS.default;
+}
+
+export function getPartyName(party: string): string {
+  return PARTY_NAMES[party] || party;
 }

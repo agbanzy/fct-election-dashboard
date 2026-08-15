@@ -135,6 +135,74 @@ def get_standings(election_id: int):
         )
 
 
+@bp.get("/<int:election_id>/reporting-by-lga")
+def reporting_by_lga(election_id: int):
+    """Per-LGA reporting progress: result sheets published vs polling units.
+
+    This is the breakdown the state map can actually show on election night.
+    Party tallies need transcribed votes, and INEC's 2026 IReV publishes only
+    EC8A scans — so "how much of each LGA has reported" is the real live
+    signal, and it is honest about being progress rather than results.
+
+    `expected` counts the polling units we have walked, so an LGA the scraper
+    has not reached yet reports null rather than a misleading 0%.
+    """
+    from app.models import Lga, PollingUnit, PollingUnitForm, Ward
+
+    with session_scope() as session:
+        election = session.get(Election, election_id)
+        if election is None:
+            abort(404)
+
+        expected = dict(
+            session.execute(
+                select(Lga.lga_id, func.count(PollingUnit.pu_id))
+                .join(Ward, Ward.lga_id == Lga.lga_id)
+                .join(PollingUnit, PollingUnit.ward_id == Ward.ward_id)
+                .where(Lga.state_id == election.state_id)
+                .group_by(Lga.lga_id)
+            ).all()
+        )
+        reported = dict(
+            session.execute(
+                select(PollingUnitForm.lga_id, func.count(PollingUnitForm.form_id))
+                .where(PollingUnitForm.election_id == election_id)
+                .group_by(PollingUnitForm.lga_id)
+            ).all()
+        )
+
+        lgas = list(
+            session.scalars(select(Lga).where(Lga.state_id == election.state_id))
+        )
+        out = []
+        for lga in lgas:
+            exp = int(expected.get(lga.lga_id) or 0)
+            rep = int(reported.get(lga.lga_id) or 0)
+            out.append(
+                {
+                    "lga_id": lga.lga_id,
+                    "lga_name": lga.name,
+                    "expected_pus": exp,
+                    "reported_pus": rep,
+                    # Null, not zero — an unwalked LGA is unknown, not empty.
+                    "pct": round(rep / exp, 4) if exp else None,
+                }
+            )
+        out.sort(key=lambda r: (r["pct"] is None, -(r["pct"] or 0)))
+
+        return jsonify(
+            {
+                "election": _serialize_election(election),
+                "totals": {
+                    "expected_pus": election.expected_pus or 0,
+                    "reported_pus": election.uploaded_pus or 0,
+                    "walked_pus": sum(expected.values()),
+                },
+                "by_lga": out,
+            }
+        )
+
+
 @bp.get("/<int:election_id>/by-lga")
 def standings_by_lga(election_id: int):
     """Per-LGA standings for LG/Councillor races. Returns one block per LGA

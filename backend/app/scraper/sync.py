@@ -28,6 +28,7 @@ from typing import Any
 from zoneinfo import ZoneInfo
 
 from sqlalchemy import func, select
+from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.orm import Session
 
 from app.importer.normalizers import resolve_party
@@ -37,6 +38,7 @@ from app.models import (
     ElectionResult,
     Lga,
     PollingUnit,
+    PollingUnitForm,
     State,
     Ward,
 )
@@ -648,6 +650,21 @@ def _persist_ward_pu_results(
             pu_code=pu_raw.get("pu_code") or pu_raw.get("code"),
             name=pu_raw.get("name"),
         )
+        # Record whether INEC has published this PU's result sheet, before
+        # looking for votes. For 2026 IReV serves EC8A scans and no `votes`
+        # array at all, so form presence is the only per-PU signal there is —
+        # and it aggregates into the per-LGA reporting view the map needs.
+        # The URL is also what the transcription workflow consumes.
+        doc = pu_raw.get("document")
+        if isinstance(doc, dict) and doc.get("url"):
+            _upsert_pu_form(
+                session,
+                election_id=election.election_id,
+                pu_id=pu.pu_id,
+                lga_id=ward.lga_id,
+                url=str(doc.get("url"))[:500],
+            )
+
         votes_field = pu_raw.get("votes")
         if isinstance(votes_field, str):
             try:
@@ -673,6 +690,12 @@ def _persist_ward_pu_results(
                 ElectionResult(
                     election_id=election.election_id,
                     pu_id=pu.pu_id,
+                    # Denormalised so /by-lga can group without walking
+                    # pu → ward → lga. Leaving it NULL meant the endpoint —
+                    # which filters on lga_id IS NOT NULL — returned nothing
+                    # even when PU votes existed, so the state map had no
+                    # geography to colour no matter how well the walk ran.
+                    lga_id=ward.lga_id,
                     state_id=election.state_id,
                     aggregation="pu",
                     party_id=party.party_id,
@@ -684,6 +707,29 @@ def _persist_ward_pu_results(
     if inserted:
         session.flush()
     return inserted
+
+
+def _upsert_pu_form(
+    session: Session,
+    *,
+    election_id: int,
+    pu_id: int,
+    lga_id: int | None,
+    url: str,
+) -> None:
+    """Record a published result sheet. Idempotent — the walk re-reads wards."""
+    stmt = pg_insert(PollingUnitForm).values(
+        election_id=election_id,
+        pu_id=pu_id,
+        lga_id=lga_id,
+        document_url=url,
+    )
+    session.execute(
+        stmt.on_conflict_do_update(
+            constraint="uq_pu_form_election_pu",
+            set_={"document_url": stmt.excluded.document_url, "updated_at": func.now()},
+        )
+    )
 
 
 def _as_int_safe(v: Any) -> int | None:

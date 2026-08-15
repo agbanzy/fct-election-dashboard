@@ -68,7 +68,12 @@ interface CandidateRow {
 export default function StatePage() {
   const params = useParams<{ stateCode: string }>();
   const code = (params.stateCode || "").toUpperCase();
-  const [source, setSource] = useState<"election" | "cbm">("election");
+  // Derived, not seeded: `isLive` resolves after the elections API does, and
+  // on polling day the results map has nothing to paint while the reporting
+  // map does. An explicit choice by the reader always wins.
+  const [sourceOverride, setSourceOverride] = useState<
+    "election" | "reporting" | "cbm" | null
+  >(null);
 
   const { data: state } = useApiData<StateRow>(`/api/states/${code}`, 60_000);
   const { data: elections } = useApiData<ElectionRow[]>(`/api/elections?state=${code}`, 60_000);
@@ -117,6 +122,8 @@ export default function StatePage() {
     [partyTotals],
   );
 
+  const source = sourceOverride ?? (isLive ? "reporting" : "election");
+
   return (
     <div className="space-y-6">
       <header>
@@ -141,16 +148,20 @@ export default function StatePage() {
                 {" "}— {recentElection.election_type_label} {recentElection.cycle}
               </span>
             )}
+            {source === "reporting" && (
+              <span className="font-normal text-dim"> — result sheets published</span>
+            )}
             {source === "cbm" && <span className="font-normal text-dim"> — CBM member density</span>}
           </h2>
           <div className="inline-flex rounded-full border border-dashboard-border bg-dashboard-card p-0.5">
             {([
-              ["election", "Election results"],
+              ["election", "Results"],
+              ["reporting", "Reporting"],
               ["cbm", "CBM coverage"],
             ] as const).map(([key, label]) => (
               <button
                 key={key}
-                onClick={() => setSource(key)}
+                onClick={() => setSourceOverride(key)}
                 className={`text-xs rounded-full px-3 py-1 transition-all ${
                   source === key ? "bg-accent-green/15 text-accent-green font-bold" : "text-dim hover:text-primary"
                 }`}
