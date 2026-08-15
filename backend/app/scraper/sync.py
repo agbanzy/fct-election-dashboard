@@ -24,6 +24,7 @@ import json
 import logging
 from datetime import UTC, date, datetime, timedelta
 from typing import Any
+from zoneinfo import ZoneInfo
 
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
@@ -31,6 +32,7 @@ from sqlalchemy.orm import Session
 from app.importer.normalizers import resolve_party
 from app.models import (
     Election,
+    ElectionCalendar,
     ElectionResult,
     Lga,
     PollingUnit,
@@ -59,6 +61,14 @@ RESULTS_FRESHNESS_LIVE = timedelta(minutes=2)
 RESULTS_FRESHNESS_RECENT = timedelta(hours=6)
 RESULTS_FRESHNESS_HISTORICAL = timedelta(days=7)
 
+# Nigeria is UTC+1 year-round (no DST). Every "what day is this election?"
+# question is a question about the Lagos calendar, never the UTC one.
+WAT = ZoneInfo("Africa/Lagos")
+
+
+def today_wat() -> date:
+    return datetime.now(WAT).date()
+
 
 # ────────────────────────────────────────────────────────────────────────────
 # Op 1: header discovery
@@ -72,7 +82,7 @@ def discover_election_headers(session: Session, client: IrevClient) -> dict[str,
     ensure_source(session, BACKFILL_SOURCE_NAME)
     valid_state_ids = {s.state_id for s in session.scalars(select(State))}
     touched: dict[str, int] = {}
-    today = date.today()
+    today = today_wat()
 
     for etype, irev_type_id in ELECTION_TYPE_IDS.items():
         if not irev_type_id:
@@ -123,7 +133,7 @@ def discover_election_headers(session: Session, client: IrevClient) -> dict[str,
                 state_id=state_id,
                 irev_election_id=irev_id,
                 election_date=edate,
-                status="historical",
+                status=_derive_status(edate, today),
             )
             elec.headers_synced_at = datetime.now(UTC)
             elec.sync_priority = _compute_priority(edate, today)
@@ -134,7 +144,81 @@ def discover_election_headers(session: Session, client: IrevClient) -> dict[str,
     return touched
 
 
+def reconcile_calendar(session: Session) -> int:
+    """Mirror discovered IReV elections into `election_calendar`.
+
+    `decide_mode()` — the daemon's whole wake policy — reads only
+    `election_calendar`, which until now was populated purely by hand in
+    `seed.py`. When the hand-entered date drifted from reality the daemon had
+    no way to notice: Osun 2026 was seeded as 2026-07-11, INEC actually polled
+    on 2026-08-15, and the scraper sat in `idle` (24h sleep) straight through
+    polling day.
+
+    Reconciling on every discovery pass makes IReV the source of truth and
+    keeps the seed to a bootstrap hint. Returns rows added or corrected.
+    """
+    today = today_wat()
+    changed = 0
+
+    rows = list(
+        session.scalars(
+            select(Election).where(Election.election_date.is_not(None))
+        )
+    )
+    existing = list(session.scalars(select(ElectionCalendar)))
+    # Key on the identity the calendar actually cares about, ignoring the date
+    # so a moved/corrected poll date updates in place instead of duplicating.
+    by_identity: dict[tuple[str, int | None], ElectionCalendar] = {}
+    for cal in existing:
+        by_identity.setdefault((cal.election_type, cal.state_id), cal)
+
+    for elec in rows:
+        # Only track the current and future window. Backfilling 200+ historical
+        # rows into the calendar would bloat it without changing wake policy.
+        if elec.election_date is None or (today - elec.election_date).days > 30:
+            continue
+
+        status = "live" if elec.election_date == today else (
+            "scheduled" if elec.election_date > today else "completed"
+        )
+        key = (elec.election_type, elec.state_id)
+        cal = by_identity.get(key)
+        if cal is None:
+            cal = ElectionCalendar(
+                election_date=elec.election_date,
+                election_type=elec.election_type,
+                state_id=elec.state_id,
+                status=status,
+                notes=f"auto-reconciled from IReV ({elec.irev_election_id})",
+            )
+            session.add(cal)
+            by_identity[key] = cal
+            changed += 1
+            log.info(
+                "calendar: added %s state=%s on %s (%s)",
+                elec.election_type, elec.state_id, elec.election_date, status,
+            )
+            continue
+
+        if cal.election_date != elec.election_date or cal.status != status:
+            log.info(
+                "calendar: corrected %s state=%s %s/%s -> %s/%s",
+                elec.election_type, elec.state_id,
+                cal.election_date, cal.status, elec.election_date, status,
+            )
+            cal.election_date = elec.election_date
+            cal.status = status
+            cal.notes = f"auto-reconciled from IReV ({elec.irev_election_id})"
+            changed += 1
+
+    return changed
+
+
 def _extract_cycle(raw: dict[str, Any]) -> int:
+    """Cycle year, derived from the *Nigerian* poll date (see `_extract_date`)."""
+    edate = _extract_date(raw)
+    if edate is not None:
+        return edate.year
     s = str(raw.get("election_date") or "")[:4]
     try:
         return int(s)
@@ -143,13 +227,48 @@ def _extract_cycle(raw: dict[str, Any]) -> int:
 
 
 def _extract_date(raw: dict[str, Any]) -> date | None:
-    s = str(raw.get("election_date") or "")[:10]
+    """Poll date as it falls in Nigeria (WAT), not in UTC.
+
+    IReV serialises the poll date as an instant. Rows entered as WAT midnight
+    come back as `...T23:00:00.000Z` on the *previous* UTC day — so naively
+    slicing the first 10 characters lands a day early. Osun 2026 is the live
+    example: IReV returns `2026-08-14T23:00:00.000Z`, which is Saturday
+    2026-08-15 in Lagos; the old slice stored Friday 2026-08-14, and the
+    daemon's calendar lookup then never matched on polling day.
+
+    Bare `YYYY-MM-DD` values carry no instant and are taken verbatim.
+    """
+    s = str(raw.get("election_date") or "").strip()
     if not s:
         return None
+    if "T" not in s:
+        try:
+            return date.fromisoformat(s[:10])
+        except ValueError:
+            return None
     try:
-        return date.fromisoformat(s)
+        dt = datetime.fromisoformat(s.replace("Z", "+00:00"))
     except ValueError:
-        return None
+        try:
+            return date.fromisoformat(s[:10])
+        except ValueError:
+            return None
+    if dt.tzinfo is None:
+        # No offset supplied — IReV means a Nigerian wall-clock date.
+        return dt.date()
+    return dt.astimezone(WAT).date()
+
+
+def _derive_status(election_date: date | None, today: date) -> str:
+    """Lifecycle from the poll date. Discovery used to hardcode 'historical',
+    which meant no election was ever flagged live — not even on polling day."""
+    if election_date is None:
+        return "historical"
+    if election_date > today:
+        return "scheduled"
+    if election_date == today:
+        return "live"
+    return "historical"
 
 
 def _compute_priority(election_date: date | None, today: date) -> int:

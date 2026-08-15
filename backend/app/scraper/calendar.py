@@ -9,6 +9,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from typing import Literal
+from zoneinfo import ZoneInfo
 
 from sqlalchemy import select
 from sqlalchemy.orm import Session
@@ -16,6 +17,9 @@ from sqlalchemy.orm import Session
 from app.models import ElectionCalendar
 
 Mode = Literal["live", "preflight", "idle"]
+
+# Nigeria is UTC+1 year-round.
+WAT = ZoneInfo("Africa/Lagos")
 
 
 @dataclass(frozen=True)
@@ -27,7 +31,7 @@ class WakeDecision:
 
 
 def upcoming_events(session: Session, *, limit: int = 10) -> list[ElectionCalendar]:
-    now = datetime.now(UTC).date()
+    now = datetime.now(WAT).date()
     stmt = (
         select(ElectionCalendar)
         .where(ElectionCalendar.election_date >= now)
@@ -56,10 +60,13 @@ def decide_mode(
     preflight_interval: int = 300,
     idle_interval: int = 86_400,
     preflight_window_hours: int = 6,
-    live_trailing_days: int = 1,
+    live_trailing_days: int = 3,
 ) -> WakeDecision:
     now = now or datetime.now(UTC)
-    today = now.date()
+    # Election day is a Nigerian calendar day. Between 23:00Z and 00:00Z the
+    # UTC date is still "yesterday" in Lagos, which is exactly the hour polls
+    # are being collated — so decide against the WAT calendar.
+    today = now.astimezone(WAT).date()
 
     # LIVE — an election is live for the whole of its election day (and a
     # trailing window, since INEC keeps uploading result forms for hours/days
@@ -70,6 +77,9 @@ def decide_mode(
     # "live" — which nothing did. So on election day itself the delta to
     # midnight went negative and the scraper fell through to idle (24h),
     # never aggressively syncing the live election. That gap is the bug.
+    # The trailing window matters as much as the day itself: INEC keeps
+    # uploading result forms for days after polls close, so a 1-day tail let
+    # the scraper drop back to a 24h sleep while collation was still running.
     live = live_events(session)
     window_start = today - timedelta(days=max(0, live_trailing_days))
     todays = list(
@@ -95,7 +105,7 @@ def decide_mode(
     # PREFLIGHT — an upcoming election within the preflight window before its date.
     upcoming = next_event(session)
     if upcoming is not None:
-        delta = datetime.combine(upcoming.election_date, datetime.min.time(), tzinfo=UTC) - now
+        delta = datetime.combine(upcoming.election_date, datetime.min.time(), tzinfo=WAT) - now
         if 0 <= delta.total_seconds() <= preflight_window_hours * 3600:
             state_ids = frozenset({upcoming.state_id}) if upcoming.state_id else frozenset()
             return WakeDecision(
@@ -116,5 +126,6 @@ def seconds_until(event: ElectionCalendar | None, *, now: datetime | None = None
     if event is None:
         return None
     now = now or datetime.now(UTC)
-    target = datetime.combine(event.election_date, datetime.min.time(), tzinfo=UTC)
+    # Countdown targets midnight in Lagos, which is what the UI is counting to.
+    target = datetime.combine(event.election_date, datetime.min.time(), tzinfo=WAT)
     return max(0, int((target - now).total_seconds()))

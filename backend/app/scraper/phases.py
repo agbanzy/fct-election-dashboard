@@ -56,9 +56,19 @@ def ensure_election(
     if existing:
         if irev_election_id and not existing.irev_election_id:
             existing.irev_election_id = irev_election_id
-        if election_date and not existing.election_date:
+        # IReV is authoritative on the poll date — adopt corrections, don't just
+        # fill blanks. The previous `not existing.election_date` guard meant a
+        # date stored wrong once (e.g. Osun's UTC-truncated 2026-08-14) could
+        # never be repaired, even after the parser was fixed.
+        if election_date and existing.election_date != election_date:
+            log.info(
+                "election %s: date %s -> %s (IReV)",
+                existing.election_id, existing.election_date, election_date,
+            )
             existing.election_date = election_date
-        existing.status = status
+        # Manual/terminal curation wins over a derived lifecycle value.
+        if existing.status not in ("cancelled", "postponed"):
+            existing.status = status
         return existing
     elec = Election(
         cycle=cycle,

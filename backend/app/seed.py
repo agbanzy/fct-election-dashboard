@@ -79,12 +79,13 @@ PARTIES: list[tuple[str, str, str | None, int | None]] = [
 ]
 
 
-# Known scheduled elections per INEC's published 2026-2027 calendar.
-# Phase B will reconcile these against INEC's current notice. Verify before
-# pinning to the calendar in production.
+# Bootstrap hints only. `sync.reconcile_calendar()` re-derives these from the
+# elections IReV actually publishes on every daemon iteration, so a wrong date
+# here self-corrects rather than idling the scraper through polling day (which
+# is exactly what the old Osun 2026-07-11 entry did — INEC polled 2026-08-15).
 CALENDAR: list[tuple[date, str, int | None, str, str | None]] = [
     (date(2026, 6, 20), "governorship", 13, "scheduled", "Ekiti gubernatorial 2026"),
-    (date(2026, 7, 11), "governorship", 30, "scheduled", "Osun gubernatorial 2026"),
+    (date(2026, 8, 15), "governorship", 30, "scheduled", "Osun gubernatorial 2026"),
     (date(2027, 2, 25), "presidential", None, "scheduled", "Presidential 2027 (provisional)"),
     (date(2027, 2, 25), "senate", None, "scheduled", "Senate 2027 (provisional)"),
     (date(2027, 2, 25), "reps", None, "scheduled", "House of Reps 2027 (provisional)"),

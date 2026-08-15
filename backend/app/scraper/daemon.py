@@ -86,6 +86,17 @@ def _run_iteration(client: IrevClient, cfg: Config) -> int:
             except Exception:
                 log.exception("daemon: header discovery failed")
 
+    # Reconcile the calendar against discovered elections on every iteration,
+    # not just after discovery. It is a pure DB pass (no API calls) and it is
+    # what stops a stale hand-seeded date from idling us through polling day.
+    with session_scope() as session:
+        try:
+            changed = sync.reconcile_calendar(session)
+            if changed:
+                log.info("daemon: calendar reconciled, %s row(s) changed", changed)
+        except Exception:
+            log.exception("daemon: calendar reconciliation failed")
+
     with session_scope() as session:
         decision = decide_mode(
             session,
@@ -93,6 +104,7 @@ def _run_iteration(client: IrevClient, cfg: Config) -> int:
             preflight_interval=cfg.scraper_interval_preflight_seconds,
             idle_interval=cfg.scraper_interval_idle_seconds,
             preflight_window_hours=cfg.scraper_preflight_window_hours,
+            live_trailing_days=cfg.scraper_live_trailing_days,
         )
         depth = sync.queue_depth(session)
 
