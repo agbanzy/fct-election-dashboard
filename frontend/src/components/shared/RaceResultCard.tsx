@@ -32,8 +32,9 @@ export interface RaceResult {
   election_type_label: string;
   cycle: number;
   election_date: string | null;
+  has_results?: boolean;
   total_votes: number;
-  winner: Standing;
+  winner: Standing | null;
   runner_up: Standing | null;
   margin_votes: number | null;
   margin_points: number | null;
@@ -43,12 +44,39 @@ export interface RaceResult {
 export function RaceResultCard({ race }: { race: RaceResult }) {
   const { winner, runner_up, margin_points, margin_votes } = race;
 
+  // A presidential result on a state page is the state's slice of a national
+  // contest, not a state office. Saying so stops it reading as "the election
+  // this state just held".
+  const isNational = race.election_type === "presidential";
+
+  if (!winner) {
+    return (
+      <div className="rounded-lg border border-dashboard-border/60 bg-dashboard-card/50 p-3">
+        <div className="flex items-baseline justify-between gap-3 flex-wrap">
+          <div className="text-[13px] font-bold text-dim">
+            {race.election_type_label}{" "}
+            <span className="font-normal">{race.cycle}</span>
+          </div>
+          <div className="text-[11px] text-dim">No results published</div>
+        </div>
+        <div className="text-[11px] text-dim/70 mt-1">
+          INEC has not published transcribed vote totals for this race.
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div className="rounded-lg border border-dashboard-border bg-dashboard-card p-3">
       <div className="flex items-baseline justify-between gap-3 flex-wrap mb-2">
         <div className="text-[13px] font-bold text-primary">
           {race.election_type_label}{" "}
           <span className="font-normal text-dim">{race.cycle}</span>
+          {isNational && (
+            <span className="ml-1.5 font-normal text-[11px] text-dim">
+              · national race, this state&apos;s vote
+            </span>
+          )}
         </div>
         <div className="text-[11px] text-dim font-mono">
           {formatNumber(race.total_votes)} votes

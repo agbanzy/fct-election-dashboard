@@ -153,6 +153,32 @@ def results_by_election(code: str):
                 if int(v or 0) > 0
             ]
             if not standings:
+                # Kept, not skipped. Osun has two governorship races and no
+                # published results for either, so dropping them silently left
+                # a 2023 presidential race as the headline "past result" on a
+                # governorship page — which reads as though the state's own
+                # elections do not exist. Saying "no results published" is the
+                # honest version, and names the gap instead of hiding it.
+                out.append(
+                    {
+                        "election_id": elec.election_id,
+                        "election_type": elec.election_type,
+                        "election_type_label": TYPE_LABELS.get(
+                            elec.election_type, elec.election_type
+                        ),
+                        "cycle": elec.cycle,
+                        "election_date": elec.election_date.isoformat()
+                        if elec.election_date
+                        else None,
+                        "has_results": False,
+                        "total_votes": 0,
+                        "winner": None,
+                        "runner_up": None,
+                        "margin_votes": None,
+                        "margin_points": None,
+                        "standings": [],
+                    }
+                )
                 continue
 
             total = sum(s["votes"] for s in standings)
@@ -182,6 +208,7 @@ def results_by_election(code: str):
                     "election_date": elec.election_date.isoformat()
                     if elec.election_date
                     else None,
+                    "has_results": True,
                     "total_votes": total,
                     "winner": winner,
                     "runner_up": runner_up,
@@ -195,5 +222,24 @@ def results_by_election(code: str):
                 }
             )
 
-        out.sort(key=lambda r: (r["cycle"], r["election_date"] or ""), reverse=True)
+        # Order by how much the race belongs to this state, then by recency.
+        # A presidential result is the state's slice of a national contest;
+        # leading a governorship page with it buries the office the page is
+        # actually about.
+        office_rank = {
+            "governorship": 0,
+            "senate": 1,
+            "reps": 2,
+            "state_hoa": 3,
+            "lg_chairman": 4,
+            "councillor": 5,
+            "presidential": 9,
+        }
+        out.sort(
+            key=lambda r: (
+                office_rank.get(r["election_type"], 6),
+                -(r["cycle"] or 0),
+                r["election_date"] or "",
+            )
+        )
         return jsonify({"state": {"code": state.code, "name": state.name}, "elections": out})
