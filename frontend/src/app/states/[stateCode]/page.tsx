@@ -12,6 +12,7 @@ import { useMemo, useState } from "react";
 
 import LiveElectionPanel from "@/components/shared/LiveElectionPanel";
 import MethodologyDisclosure from "@/components/shared/MethodologyDisclosure";
+import { RaceResultCard, type RaceResult } from "@/components/shared/RaceResultCard";
 import { useApiData } from "@/hooks/useApiData";
 import type { ElectionRow, StateRow } from "@/lib/api";
 
@@ -29,26 +30,6 @@ interface LgaRow {
   name: string;
   kind: string;
   irev_lga_id: number | null;
-}
-
-interface PartyTotalsResp {
-  grand_total: number;
-  /** Elections that actually contributed votes to these totals. */
-  sources?: {
-    election_id: number;
-    election_type_label: string;
-    cycle: number;
-    election_date: string | null;
-  }[];
-  parties: {
-    party_id: number;
-    party_code: string;
-    party_name: string;
-    party_color: string | null;
-    total_votes: number;
-    share: number;
-    elections_count: number;
-  }[];
 }
 
 interface CandidateRow {
@@ -78,8 +59,8 @@ export default function StatePage() {
   const { data: state } = useApiData<StateRow>(`/api/states/${code}`, 60_000);
   const { data: elections } = useApiData<ElectionRow[]>(`/api/elections?state=${code}`, 60_000);
   const { data: lgas } = useApiData<LgaRow[]>(`/api/states/${code}/lgas`, 60_000);
-  const { data: partyTotals } = useApiData<PartyTotalsResp>(
-    `/api/analysis/party-totals?state=${code}`,
+  const { data: raceResults } = useApiData<{ elections: RaceResult[] }>(
+    `/api/states/${code}/results-by-election`,
     5 * 60_000,
   );
   const { data: candidates } = useApiData<CandidateRow[]>(
@@ -109,18 +90,6 @@ export default function StatePage() {
     // election day or the ~2 days after (results still uploading)
     return now - t < 2.5 * 86_400_000 && t - now < 86_400_000;
   }, [recentElection]);
-
-  // Name the races behind the cumulative block so "55.2% APC" can't be read
-  // as today's number. These come from the API's `sources` — the elections
-  // that actually contributed votes. Listing every past race instead would
-  // contradict the count, since most have no published results.
-  const historicalRaces = useMemo(
-    () =>
-      (partyTotals?.sources || [])
-        .map((s) => `${s.election_type_label} ${s.cycle}`)
-        .slice(0, 4),
-    [partyTotals],
-  );
 
   const source = sourceOverride ?? (isLive ? "reporting" : "election");
 
@@ -180,33 +149,19 @@ export default function StatePage() {
         />
       </section>
 
-      {partyTotals && partyTotals.grand_total > 0 && (
+      {raceResults && raceResults.elections.length > 0 && (
         <section>
           <h2 className="text-sm font-bold uppercase tracking-wider text-dim mb-1">
             Past results · {state?.name || code}
           </h2>
-          <p className="text-[11px] text-dim mb-2">
-            {historicalRaces.length > 0
-              ? `Cumulative across ${historicalRaces.join(", ")}.`
-              : "Cumulative across concluded races with published results."}
+          <p className="text-[11px] text-dim mb-3">
+            Each concluded race on its own — winner, runner-up, and the gap
+            between them.
             {isLive && " Today's election is not included — see the live panel above."}
           </p>
-          <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-6 gap-2">
-            {partyTotals.parties.slice(0, 12).map((p) => (
-              <div
-                key={p.party_id}
-                className="rounded border border-dashboard-border bg-dashboard-card p-2"
-              >
-                <div className="flex items-center gap-1.5">
-                  <span
-                    className="inline-block w-2 h-2 rounded-full"
-                    style={{ background: p.party_color || "#94a3b8" }}
-                  />
-                  <span className="font-bold text-primary text-sm">{p.party_code}</span>
-                </div>
-                <div className="font-mono font-bold text-base">{p.total_votes.toLocaleString()}</div>
-                <div className="text-[10px] text-dim">{(p.share * 100).toFixed(1)}%</div>
-              </div>
+          <div className="space-y-2">
+            {raceResults.elections.map((r) => (
+              <RaceResultCard key={r.election_id} race={r} />
             ))}
           </div>
         </section>
