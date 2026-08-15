@@ -76,6 +76,15 @@ Return ONLY a JSON object, no prose:
  "registered":null,"accredited":null,"rejected":null,"total_valid":null}"""
 
 
+class ReaderUnavailable(RuntimeError):
+    """The reader cannot work at all — no credit, bad key, rate-limited.
+
+    Separate from a sheet being unreadable: this says nothing about the scan,
+    applies equally to every sheet behind it, and is fixed by billing or
+    waiting rather than by trying again immediately.
+    """
+
+
 @dataclass(frozen=True)
 class VisionReading:
     party_votes: dict[str, int]
@@ -212,6 +221,14 @@ def read_ec8a(image_bytes: bytes, *, api_key: str | None = None, timeout: int = 
 
     if resp.status_code != 200:
         log.warning("ec8a_vision: HTTP %s: %s", resp.status_code, resp.text[:200])
+        # Out of credit, bad key, or rate-limited: the next sheet will fail
+        # identically, so the caller must stop rather than walk the queue
+        # logging the same error thousands of times. Distinguished from an
+        # ordinary failure because the remedy is billing, not retrying.
+        if resp.status_code in (401, 403, 429) or "credit balance" in resp.text:
+            raise ReaderUnavailable(
+                f"HTTP {resp.status_code}: {resp.text[:160]}"
+            )
         return None
 
     try:

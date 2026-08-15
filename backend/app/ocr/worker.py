@@ -28,7 +28,7 @@ from sqlalchemy.orm import Session
 
 from app.importer.normalizers import resolve_party
 from app.models import Election, ElectionResult, PollingUnit, PollingUnitForm, Ward
-from app.ocr.ec8a_vision import read_ec8a
+from app.ocr.ec8a_vision import ReaderUnavailable, read_ec8a
 from app.scraper.phases import ensure_source
 
 log = logging.getLogger(__name__)
@@ -114,7 +114,15 @@ def read_pending_forms(
             # about the sheet, so it stays in the queue.
             continue
 
-        reading = read_ec8a(img.content, api_key=api_key)
+        try:
+            reading = read_ec8a(img.content, api_key=api_key)
+        except ReaderUnavailable as exc:
+            # No credit / bad key / throttled. Every remaining sheet would
+            # fail the same way, so stop the batch instead of walking 3,000
+            # rows to log the same message 3,000 times.
+            log.error("ocr: reader unavailable, stopping batch — %s", exc)
+            counters["blocked"] = 1
+            break
         if reading is None:
             # Reader unavailable, not sheet unreadable. Same reasoning.
             counters["errors"] += 1
