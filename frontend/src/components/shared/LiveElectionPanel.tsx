@@ -124,10 +124,27 @@ export default function LiveElectionPanel({
               <ReportingBar pct={pct} />
             </div>
 
-            {!counting && (
+            {!counting && uploaded_pus === 0 && (
               <div className="text-[13px] text-dim italic">
-                Polls are open. INEC has not published result forms to IReV yet —
-                tallies appear here as they upload.
+                Polls are open. INEC has not published any result forms to IReV
+                yet — this bar moves as they upload.
+              </div>
+            )}
+
+            {/* Forms are arriving but carry no machine-readable votes. Saying
+                "tallies appear here as they upload" would promise something
+                the pipeline cannot deliver: IReV serves EC8A scans, and the
+                PU payload's votes field is null for this election. */}
+            {!counting && uploaded_pus > 0 && (
+              <div className="text-[13px] text-dim">
+                <span className="font-semibold text-primary">
+                  {formatNumber(uploaded_pus)} result{" "}
+                  {uploaded_pus === 1 ? "form" : "forms"}
+                </span>{" "}
+                published so far. INEC uploads these as scanned EC8A sheets, not
+                as vote counts — party totals appear here only once the sheets
+                are transcribed, so this figure tracks{" "}
+                <span className="italic">reporting progress</span>, not results.
               </div>
             )}
 
