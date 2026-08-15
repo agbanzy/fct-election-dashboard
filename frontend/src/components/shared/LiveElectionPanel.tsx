@@ -31,7 +31,12 @@ interface LiveElection {
   reporting: { expected_pus: number; uploaded_pus: number; pct: number };
   total_votes: number;
   tallies: Tally[];
-  tally_coverage?: { pus_with_votes: number; reported_pus: number; pct: number };
+  tally_coverage?: {
+    pus_with_votes: number;
+    reported_pus: number;
+    pct: number;
+    machine_read_pus?: number;
+  };
   results_synced_at: string | null;
 }
 
@@ -214,6 +219,17 @@ export default function LiveElectionPanel({
                   ))}
                 </ul>
 
+                {(e.tally_coverage?.machine_read_pus ?? 0) > 0 && (
+                  <div className="mt-3 rounded border border-accent-orange/30 bg-accent-orange/10 px-2.5 py-1.5 text-[11px] text-accent-orange">
+                    <span className="font-bold">Machine-read, unverified.</span>{" "}
+                    {formatNumber(e.tally_coverage?.machine_read_pus ?? 0)} of these
+                    polling units were read automatically from INEC&apos;s scanned
+                    result sheets, not transcribed by INEC. Each was accepted only
+                    where the figures and the written words on the sheet matched and
+                    the totals added up — but no person has checked them. Treat as
+                    indicative, not official.
+                  </div>
+                )}
                 <div className="text-[11px] text-dim mt-3 pt-2 border-t border-accent-red/20">
                   {formatNumber(e.total_votes)} votes counted from{" "}
                   {formatNumber(e.tally_coverage?.pus_with_votes ?? 0)} of{" "}

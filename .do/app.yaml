@@ -119,6 +119,14 @@ workers:
       - key: SCRAPER_BURST_FACTOR
         scope: RUN_TIME
         value: "1.0"
+      # Machine reading of EC8A scans. Off by default and deliberately so:
+      # each sheet costs a vision API call, and a state publishes thousands.
+      # Readings are cached permanently per image, so this is a drain rate, not
+      # a recurring bill — 0 disables it entirely, and it stays disabled unless
+      # ANTHROPIC_API_KEY is also set as a SECRET in the DO console.
+      - key: OCR_SHEETS_PER_TICK
+        scope: RUN_TIME
+        value: "0"
       - key: LOG_LEVEL
         scope: RUN_TIME
         value: INFO

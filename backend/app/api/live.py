@@ -23,6 +23,7 @@ from app.models import (
     Election,
     ElectionResult,
     Party,
+    PollingUnitForm,
     State,
 )
 from app.scraper.election_types import LABELS as TYPE_LABELS
@@ -84,6 +85,16 @@ def now():
                     ElectionResult.pu_id.is_not(None),
                 )
             ) or 0
+
+            # Units whose votes were read off the scan by machine rather than
+            # transcribed by INEC.
+            machine_read = session.scalar(
+                select(func.count(PollingUnitForm.form_id)).where(
+                    PollingUnitForm.election_id == elec.election_id,
+                    PollingUnitForm.ocr_status == "read",
+                )
+            ) or 0
+
             if not have_pu:
                 aggregation = session.scalar(
                     select(ElectionResult.aggregation)
@@ -159,6 +170,11 @@ def now():
                         "pus_with_votes": pus_with_votes,
                         "reported_pus": uploaded,
                         "pct": round(pus_with_votes / uploaded, 4) if uploaded else 0.0,
+                        # How many of those units were read off a scan by
+                        # machine rather than transcribed by INEC. The UI must
+                        # say so: a number nobody has checked should never sit
+                        # on the page looking like an official return.
+                        "machine_read_pus": machine_read,
                     },
                     "results_synced_at": elec.results_synced_at.isoformat()
                     if elec.results_synced_at

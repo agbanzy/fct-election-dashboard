@@ -14,13 +14,17 @@ us aware of newly-published election rows.
 from __future__ import annotations
 
 import logging
+import os
 import signal
 import sys
 import time
 from datetime import UTC, datetime, timedelta
 
+from sqlalchemy import select
+
 from app.config import Config
 from app.db import init_engine, session_scope
+from app.models import Election
 from app.scraper import sync
 from app.scraper.calendar import decide_mode
 from app.scraper.irev_client import IrevClient
@@ -133,6 +137,7 @@ def _run_iteration(client: IrevClient, cfg: Config) -> int:
                 max_seconds=_budget_seconds(decision.interval_seconds),
             )
         log.info("daemon: live tick %s (burst=%s)", counters, burst)
+        _read_sheets(decision)
     elif decision.mode == "preflight":
         budget = int(15 * burst)
         with session_scope() as session:
@@ -160,6 +165,44 @@ def _run_iteration(client: IrevClient, cfg: Config) -> int:
             return min(decision.interval_seconds, sleep)
 
     return decision.interval_seconds
+
+
+#: Sheets read per live tick. Each costs one vision call, and readings are
+#: cached permanently, so this is a rate — not a repeated bill. Kept modest so
+#: a polling day drains steadily rather than spending thousands of calls in the
+#: first few minutes; raise via OCR_SHEETS_PER_TICK when a race needs catching
+#: up. Zero (the default) leaves machine reading off entirely.
+def _sheets_per_tick() -> int:
+    try:
+        return max(0, int(os.environ.get("OCR_SHEETS_PER_TICK", "0")))
+    except ValueError:
+        return 0
+
+
+def _read_sheets(decision) -> None:
+    """Machine-read a bounded batch of published sheets for the live races.
+
+    Off unless both a key and a per-tick budget are configured: reading costs
+    money, so it must be switched on deliberately rather than by deploying.
+    """
+    limit = _sheets_per_tick()
+    if limit == 0 or not os.environ.get("ANTHROPIC_API_KEY"):
+        return
+    try:
+        from app.ocr.worker import read_pending_forms
+
+        with session_scope() as session:
+            live_ids = list(
+                session.scalars(
+                    select(Election.election_id).where(Election.status == "live")
+                )
+            )
+            for eid in live_ids:
+                counters = read_pending_forms(session, eid, limit=limit)
+                if counters["attempted"]:
+                    log.info("daemon: ec8a read e=%s %s", eid, counters)
+    except Exception:  # noqa: BLE001 — reading must never take the daemon down
+        log.exception("daemon: ec8a reading failed")
 
 
 def _interruptible_sleep(seconds: int) -> None:

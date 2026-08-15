@@ -13,6 +13,7 @@ from sqlalchemy import (
     BigInteger,
     Boolean,
     Date,
+    Float,
     ForeignKey,
     Index,
     Integer,
@@ -179,6 +180,24 @@ class PollingUnitForm(Base):
     )
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), nullable=False
+    )
+
+    # ── Machine reading ────────────────────────────────────────────────────
+    # Reading a sheet costs a vision API call, so the result is cached here and
+    # each sheet is read once. `ocr_url` records which image was read: INEC
+    # replaces sheets (a re-upload gets a new URL), and that is the one case
+    # where re-reading is warranted. Everything else is served from this row.
+    #
+    # pending → read | unreadable | error. `unreadable` is terminal: a sheet
+    # whose figures and words disagree will disagree just as much next time,
+    # and retrying it only spends money to reach the same conclusion.
+    ocr_status: Mapped[str | None] = mapped_column(Text, nullable=True)
+    ocr_url: Mapped[str | None] = mapped_column(Text, nullable=True)
+    ocr_confidence: Mapped[float | None] = mapped_column(Float, nullable=True)
+    ocr_votes: Mapped[dict | None] = mapped_column(JSONB, nullable=True)
+    ocr_problems: Mapped[list | None] = mapped_column(JSONB, nullable=True)
+    ocr_read_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
     )
 
     __table_args__ = (
