@@ -289,6 +289,24 @@ def _compute_priority(election_date: date | None, today: date) -> int:
 # Op 2: structure sync
 # ────────────────────────────────────────────────────────────────────────────
 
+def _has_geography(session: Session, state_id: int) -> bool:
+    """Does this state actually hold wards?
+
+    The freshness window trusts `structure_synced_at`, but the broken parser
+    stamped that timestamp while ingesting nothing — so every affected
+    election was locked out of re-syncing for 30 days by a success that never
+    happened. Checking for real rows makes the repair self-healing instead of
+    requiring someone to hand-clear timestamps in production.
+    """
+    return bool(
+        session.scalar(
+            select(func.count(Ward.ward_id))
+            .join(Lga, Lga.lga_id == Ward.lga_id)
+            .where(Lga.state_id == state_id)
+        )
+    )
+
+
 def sync_election_structure(
     session: Session, client: IrevClient, election: Election, *, force: bool = False
 ) -> bool:
@@ -302,6 +320,7 @@ def sync_election_structure(
         not force
         and election.structure_synced_at
         and now - election.structure_synced_at < STRUCTURE_FRESHNESS
+        and _has_geography(session, election.state_id)
     ):
         return False
     try:
@@ -434,9 +453,15 @@ def tick(session: Session, client: IrevClient, *, max_api_calls: int) -> dict[st
         if calls >= max_api_calls:
             break
 
+        # Retry whenever the geography is genuinely absent, not just when the
+        # timestamp is unset — the old parser stamped success while ingesting
+        # nothing, and gating on the timestamp alone made that permanent.
         if (
-            elec.structure_synced_at is None
-            and elec.state_id is not None
+            elec.state_id is not None
+            and (
+                elec.structure_synced_at is None
+                or not _has_geography(session, elec.state_id)
+            )
             and sync_election_structure(session, client, elec)
         ):
             counters["structure"] += 1
