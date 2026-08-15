@@ -197,6 +197,28 @@ def _read_sheets(decision) -> None:
                     select(Election.election_id).where(Election.status == "live")
                 )
             )
+        # A concluded race can be fully scanned and still have no published
+        # totals — Osun's 2022 governorship has an EC8A for all 3,763 polling
+        # units and no vote figures anywhere, which left the state page with
+        # nothing of its own to show. Naming an election here drains its
+        # sheets too, so a back-catalogue can be recovered without waiting for
+        # INEC to transcribe anything.
+        backfill = os.environ.get("OCR_BACKFILL_ELECTION_ID", "").strip()
+        if backfill.isdigit():
+            eid = int(backfill)
+            if eid not in live_ids:
+                live_ids.append(eid)
+            # Reading a sheet needs the sheet to have been discovered, and
+            # discovery happens in the ward walk — which orders by priority and
+            # puts historical races last. Promote the backfill target just
+            # behind live so its wards are actually reached, otherwise the
+            # reader sits on an empty queue while the walk is elsewhere.
+            with session_scope() as session:
+                elec = session.get(Election, eid)
+                if elec is not None and (elec.sync_priority or 9) > 2:
+                    elec.sync_priority = 2
+                    elec.sync_complete = False
+                    log.info("daemon: promoted election %s for OCR backfill", eid)
         # Deliberately outside the session above: the reader manages its own
         # short transactions around slow network work, and holding one here
         # would reintroduce exactly the stall it was restructured to avoid.
