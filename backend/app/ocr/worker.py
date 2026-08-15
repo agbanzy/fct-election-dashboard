@@ -18,6 +18,7 @@ authoritative; a human accepting a sheet in /admin is what makes it so.
 from __future__ import annotations
 
 import logging
+import time
 from datetime import UTC, datetime
 
 import requests
@@ -44,52 +45,70 @@ OCR_SOURCE_NAME = "irev_ec8a_machine_read"
 
 
 def read_pending_forms(
-    session: Session,
+    session_factory,
     election_id: int,
     *,
     limit: int = 25,
     api_key: str | None = None,
+    max_seconds: float = 240.0,
 ) -> dict[str, int]:
     """Read up to `limit` unread sheets for one election.
 
-    Returns counters. Bounded per call so a caller can spend a predictable
-    number of API calls per tick rather than draining thousands at once.
+    Takes a session *factory*, not a session, and that is the whole point.
+    Reading a sheet means two slow network calls — fetch the scan, then the
+    vision request — and doing 25 of those inside one open transaction pinned
+    a connection idle-in-transaction for minutes at a time. In production that
+    wedged the daemon completely: it stopped logging for over an hour and the
+    IReV walk stopped with it, because the next iteration's session queued
+    behind the one this function was holding.
+
+    So: claim a batch in one short transaction, do all network work with no
+    transaction open, and commit each sheet in its own short transaction.
+    `max_seconds` bounds the batch so a slow upstream cannot stretch it
+    indefinitely.
     """
     counters = {"attempted": 0, "read": 0, "unreadable": 0, "errors": 0, "published": 0}
+    deadline = time.monotonic() + max_seconds
 
-    rows = list(
-        session.scalars(
-            select(PollingUnitForm)
-            .where(
-                PollingUnitForm.election_id == election_id,
-                PollingUnitForm.document_url.isnot(None),
-                # Never read the same image twice: unread sheets, or ones whose
-                # image has since been replaced.
-                or_(
-                    PollingUnitForm.ocr_status.is_(None),
-                    PollingUnitForm.ocr_url.is_(None),
-                    PollingUnitForm.ocr_url != PollingUnitForm.document_url,
-                ),
+    # ── 1. Claim a batch. Short transaction, no network. ──────────────────
+    with session_factory() as session:
+        election = session.get(Election, election_id)
+        if election is None:
+            return counters
+        cycle = election.cycle
+        state_id = election.state_id
+        work = [
+            (f.form_id, f.pu_id, f.lga_id, f.document_url)
+            for f in session.scalars(
+                select(PollingUnitForm)
+                .where(
+                    PollingUnitForm.election_id == election_id,
+                    PollingUnitForm.document_url.isnot(None),
+                    # Never read the same image twice: unread sheets, or ones
+                    # whose image has since been replaced.
+                    or_(
+                        PollingUnitForm.ocr_status.is_(None),
+                        PollingUnitForm.ocr_url.is_(None),
+                        PollingUnitForm.ocr_url != PollingUnitForm.document_url,
+                    ),
+                )
+                .limit(limit)
             )
-            .limit(limit)
-        )
-    )
-    if not rows:
+        ]
+    if not work:
         return counters
 
-    election = session.get(Election, election_id)
-    if election is None:
-        return counters
-    source = ensure_source(session, OCR_SOURCE_NAME)
-
-    for form in rows:
+    # ── 2. Network work, with nothing held. ───────────────────────────────
+    for form_id, pu_id, lga_id, url in work:
+        if time.monotonic() > deadline:
+            log.info("ocr: batch hit its %ss budget after %s sheets", max_seconds, counters["attempted"])
+            break
         counters["attempted"] += 1
-        url = form.document_url or ""
         try:
-            img = requests.get(url, timeout=45)
+            img = requests.get(url or "", timeout=30)
             img.raise_for_status()
         except requests.RequestException as exc:
-            log.warning("ocr: fetch failed pu=%s: %s", form.pu_id, exc)
+            log.warning("ocr: fetch failed pu=%s: %s", pu_id, exc)
             counters["errors"] += 1
             # Left unstamped on purpose — a transport failure says nothing
             # about the sheet, so it stays in the queue.
@@ -101,32 +120,49 @@ def read_pending_forms(
             counters["errors"] += 1
             continue
 
-        form.ocr_url = url
-        form.ocr_confidence = reading.confidence
-        form.ocr_votes = reading.party_votes or {}
-        form.ocr_problems = reading.problems or []
-        form.ocr_read_at = datetime.now(UTC)
+        # ── 3. Persist this one sheet. Short transaction, no network. ─────
+        publishable = reading.confidence >= PUBLISH_CONFIDENCE and bool(reading.party_votes)
+        try:
+            with session_factory() as session:
+                form = session.get(PollingUnitForm, form_id)
+                if form is None:
+                    continue
+                form.ocr_url = url
+                form.ocr_confidence = reading.confidence
+                form.ocr_votes = reading.party_votes or {}
+                form.ocr_problems = reading.problems or []
+                form.ocr_read_at = datetime.now(UTC)
+                form.ocr_status = "read" if publishable else "unreadable"
 
-        if reading.confidence >= PUBLISH_CONFIDENCE and reading.party_votes:
-            form.ocr_status = "read"
-            counters["read"] += 1
-            counters["published"] += _publish(
-                session, election, form, reading.party_votes, source_id=source.source_id
-            )
-        else:
-            form.ocr_status = "unreadable"
-            counters["unreadable"] += 1
+                if publishable:
+                    source = ensure_source(session, OCR_SOURCE_NAME)
+                    counters["published"] += _publish(
+                        session,
+                        election_id=election_id,
+                        cycle=cycle,
+                        state_id=state_id,
+                        pu_id=pu_id,
+                        lga_id=lga_id,
+                        party_votes=reading.party_votes,
+                        source_id=source.source_id,
+                    )
+            counters["read" if publishable else "unreadable"] += 1
+        except Exception:  # noqa: BLE001 — one bad sheet must not kill the batch
+            log.exception("ocr: persist failed pu=%s", pu_id)
+            counters["errors"] += 1
 
-    session.flush()
     return counters
 
 
 def _publish(
     session: Session,
-    election: Election,
-    form: PollingUnitForm,
-    party_votes: dict[str, int],
     *,
+    election_id: int,
+    cycle: int,
+    state_id: int | None,
+    pu_id: int,
+    lga_id: int | None,
+    party_votes: dict[str, int],
     source_id: int,
 ) -> int:
     """Write a corroborated reading into the tallies.
@@ -135,26 +171,25 @@ def _publish(
     figure INEC later transcribes converge on one row per party rather than
     doubling the polling unit.
     """
-    lga_id = form.lga_id
     if lga_id is None:
         lga_id = session.scalar(
             select(Ward.lga_id)
             .join(PollingUnit, PollingUnit.ward_id == Ward.ward_id)
-            .where(PollingUnit.pu_id == form.pu_id)
+            .where(PollingUnit.pu_id == pu_id)
         )
 
     written = 0
     for code, votes in party_votes.items():
         if not isinstance(votes, int) or votes < 0:
             continue
-        party = resolve_party(session, code=code, cycle=election.cycle, autocreate=True)
+        party = resolve_party(session, code=code, cycle=cycle, autocreate=True)
         if party is None:
             continue
         stmt = pg_insert(ElectionResult).values(
-            election_id=election.election_id,
-            pu_id=form.pu_id,
+            election_id=election_id,
+            pu_id=pu_id,
             lga_id=lga_id,
-            state_id=election.state_id,
+            state_id=state_id,
             aggregation="pu",
             party_id=party.party_id,
             votes=votes,

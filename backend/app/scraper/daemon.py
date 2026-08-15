@@ -197,10 +197,12 @@ def _read_sheets(decision) -> None:
                     select(Election.election_id).where(Election.status == "live")
                 )
             )
-            for eid in live_ids:
-                counters = read_pending_forms(session, eid, limit=limit)
-                if counters["attempted"]:
-                    log.info("daemon: ec8a read e=%s %s", eid, counters)
+        # Deliberately outside the session above: the reader manages its own
+        # short transactions around slow network work, and holding one here
+        # would reintroduce exactly the stall it was restructured to avoid.
+        for eid in live_ids:
+            counters = read_pending_forms(session_scope, eid, limit=limit)
+            log.info("daemon: ec8a read e=%s %s", eid, counters)
     except Exception:  # noqa: BLE001 — reading must never take the daemon down
         log.exception("daemon: ec8a reading failed")
 
