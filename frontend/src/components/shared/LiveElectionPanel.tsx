@@ -61,16 +61,29 @@ function ReportingBar({ pct }: { pct: number }) {
   );
 }
 
-export default function LiveElectionPanel() {
+export default function LiveElectionPanel({
+  stateCode = null,
+}: {
+  /** Restrict to one state — used on state pages. Null shows every live race. */
+  stateCode?: string | null;
+}) {
   // 60s: the scraper itself runs a 120s live cycle, so polling faster only
   // re-reads the same numbers.
   const { data, error } = useApiData<LiveNow>("/api/live/now", 60_000);
 
-  if (error || !data?.live || data.elections.length === 0) return null;
+  if (error || !data?.live) return null;
+
+  const elections = stateCode
+    ? data.elections.filter(
+        (e) => e.state_code?.toUpperCase() === stateCode.toUpperCase(),
+      )
+    : data.elections;
+
+  if (elections.length === 0) return null;
 
   return (
     <div className="space-y-3">
-      {data.elections.map((e) => {
+      {elections.map((e) => {
         const { expected_pus, uploaded_pus, pct } = e.reporting;
         const counting = e.tallies.length > 0;
         const leader = counting ? e.tallies[0] : null;

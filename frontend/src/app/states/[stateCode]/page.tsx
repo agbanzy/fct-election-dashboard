@@ -10,6 +10,7 @@ import Link from "next/link";
 import { useParams } from "next/navigation";
 import { useMemo, useState } from "react";
 
+import LiveElectionPanel from "@/components/shared/LiveElectionPanel";
 import MethodologyDisclosure from "@/components/shared/MethodologyDisclosure";
 import { useApiData } from "@/hooks/useApiData";
 import type { ElectionRow, StateRow } from "@/lib/api";
@@ -97,6 +98,18 @@ export default function StatePage() {
     return now - t < 2.5 * 86_400_000 && t - now < 86_400_000;
   }, [recentElection]);
 
+  // Name the races behind the cumulative block so "55.2% APC" can't be read
+  // as today's number. Anything dated before today has concluded.
+  const historicalRaces = useMemo(() => {
+    const today = new Date().toISOString().slice(0, 10);
+    return (elections || [])
+      .filter((e) => e.election_date && (e.election_date as string) < today)
+      .slice()
+      .sort((a, b) => (b.election_date as string).localeCompare(a.election_date as string))
+      .map((e) => `${e.election_type_label} ${e.cycle}`)
+      .slice(0, 4);
+  }, [elections]);
+
   return (
     <div className="space-y-6">
       <header>
@@ -106,6 +119,11 @@ export default function StatePage() {
           {elections?.length ?? 0} elections · {lgas?.length ?? 0} LGAs · {candidates?.length ?? 0} candidates
         </p>
       </header>
+
+      {/* Today's race leads. Without this the page opened on the cumulative
+          party-share block, which on polling day reads as a live result when
+          it is actually historical. */}
+      <LiveElectionPanel stateCode={code} />
 
       <section>
         <div className="flex flex-wrap items-center justify-between gap-2 mb-2">
@@ -146,9 +164,16 @@ export default function StatePage() {
 
       {partyTotals && partyTotals.grand_total > 0 && (
         <section>
-          <h2 className="text-sm font-bold uppercase tracking-wider text-dim mb-2">
-            Party share in {state?.name || code} (cumulative across {partyTotals.parties[0]?.elections_count ?? 0} races with data)
+          <h2 className="text-sm font-bold uppercase tracking-wider text-dim mb-1">
+            Past results · {state?.name || code}
           </h2>
+          <p className="text-[11px] text-dim mb-2">
+            Cumulative across {partyTotals.parties[0]?.elections_count ?? 0}{" "}
+            previously concluded {(partyTotals.parties[0]?.elections_count ?? 0) === 1 ? "race" : "races"} with
+            published results
+            {historicalRaces.length > 0 && ` (${historicalRaces.join(", ")})`}.
+            {isLive && " Today's election is not included — see the live panel above."}
+          </p>
           <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-6 gap-2">
             {partyTotals.parties.slice(0, 12).map((p) => (
               <div
@@ -219,7 +244,15 @@ export default function StatePage() {
               {(elections || []).map((e) => (
                 <tr key={e.election_id} className="border-t border-dashboard-border/40">
                   <td className="py-2 px-3 font-semibold">{e.cycle}</td>
-                  <td className="py-2 px-3">{e.election_type_label}</td>
+                  <td className="py-2 px-3">
+                    {e.election_type_label}
+                    {e.status === "live" && (
+                      <span className="ml-2 inline-flex items-center gap-1 text-[9px] font-bold uppercase tracking-wider text-accent-red bg-accent-red/15 px-1.5 py-0.5 rounded align-middle">
+                        <span className="w-1.5 h-1.5 rounded-full bg-accent-red animate-pulse" />
+                        Live
+                      </span>
+                    )}
+                  </td>
                   <td className="py-2 px-3 text-dim font-mono text-xs">{e.election_date || "—"}</td>
                   <td className="py-2 px-3 text-right">
                     <Link href={`/elections/${e.election_id}`} className="text-xs text-accent-green underline">
