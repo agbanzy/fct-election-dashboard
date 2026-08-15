@@ -10,19 +10,21 @@ import { BarChart, Bar, ResponsiveContainer, XAxis, YAxis, Tooltip, CartesianGri
 
 import AnimatedCounter from "@/components/shared/AnimatedCounter";
 import ElectionCountdown from "@/components/shared/ElectionCountdown";
+import LiveElectionPanel from "@/components/shared/LiveElectionPanel";
 import MethodologyDisclosure from "@/components/shared/MethodologyDisclosure";
+import NewsFeed from "@/components/shared/NewsFeed";
 import NigeriaChoropleth from "@/components/shared/NigeriaChoropleth";
 import StatCard from "@/components/shared/StatCard";
 import { useFilters } from "@/context/FilterContext";
 import { useApiData } from "@/hooks/useApiData";
-import type { StateRow } from "@/lib/api";
+import type { CalendarEvent, StateRow } from "@/lib/api";
 import { ELECTION_LABELS, type ElectionType } from "@/lib/electionTypeConfig";
 import { formatNumber } from "@/lib/utils";
 
 interface OverviewResponse {
   scope: string;
   cycle: number | null;
-  totals: { states: number; lgas: number; elections: number };
+  totals: { states: number; lgas: number; elections: number; candidates?: number };
   cycles: { cycle: number; elections: number }[];
   election_types: { type: string; count: number }[];
   recent_elections: {
@@ -45,6 +47,14 @@ export default function DashboardPage() {
   const { data: states } = useApiData<StateRow[]>("/api/states", 5 * 60_000);
   const stateById = new Map((states || []).map((s) => [s.state_id, s] as const));
 
+  // On polling day the news panel narrows to the state that is voting.
+  const { data: nextEvent } = useApiData<CalendarEvent | null>(
+    "/api/calendar/next",
+    60_000,
+  );
+  const liveState =
+    nextEvent?.status === "live" ? nextEvent.state_name ?? null : null;
+
   const cycleChartData = (overview?.cycles || [])
     .slice()
     .sort((a, b) => a.cycle - b.cycle)
@@ -63,6 +73,7 @@ export default function DashboardPage() {
         </div>
       )}
 
+      <LiveElectionPanel />
       <ElectionCountdown />
 
       <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
@@ -73,15 +84,15 @@ export default function DashboardPage() {
           color="#3b82f6"
         />
         <StatCard
-          label="LGAs covered"
-          value={overview ? <AnimatedCounter value={overview.totals.lgas} /> : "—"}
-          sub="of 774"
-          color="#10b981"
-        />
-        <StatCard
           label="Elections on record"
           value={overview ? <AnimatedCounter value={overview.totals.elections} /> : "—"}
           sub="across all cycles"
+          color="#10b981"
+        />
+        <StatCard
+          label="Candidates"
+          value={overview ? <AnimatedCounter value={overview.totals.candidates ?? 0} /> : "—"}
+          sub="with results attached"
           color="#a78bfa"
         />
         <StatCard
@@ -138,7 +149,16 @@ export default function DashboardPage() {
         </section>
       </div>
 
-      <NigeriaChoropleth />
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+        <NewsFeed
+          focus={liveState}
+          limit={14}
+          title={liveState ? "Live coverage" : "Political news"}
+        />
+        <div className="min-w-0">
+          <NigeriaChoropleth />
+        </div>
+      </div>
 
       <section>
         <h2 className="text-sm font-bold uppercase tracking-wider text-dim mb-2">
@@ -158,12 +178,19 @@ export default function DashboardPage() {
                 className="rounded border border-dashboard-border bg-dashboard-card px-3 py-2 text-sm flex items-center justify-between"
               >
                 <div>
-                  <div className="font-semibold text-primary">
+                  <div className="font-semibold text-primary flex items-center gap-2">
                     {ELECTION_LABELS[e.type as ElectionType] || e.type} · {e.cycle}
+                    {e.status === "live" && (
+                      <span className="inline-flex items-center gap-1 text-[9px] font-bold uppercase tracking-wider text-accent-red bg-accent-red/15 px-1.5 py-0.5 rounded">
+                        <span className="w-1.5 h-1.5 rounded-full bg-accent-red animate-pulse" />
+                        Live
+                      </span>
+                    )}
                   </div>
                   <div className="text-[11px] text-dim">
                     {s ? s.name : e.state_id ? "—" : "National"} ·{" "}
-                    {e.date || "date unknown"} · {e.status}
+                    {e.date || "date unknown"}
+                    {e.status !== "live" && ` · ${e.status}`}
                   </div>
                 </div>
                 <Link

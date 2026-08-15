@@ -6,7 +6,7 @@ from flask import Blueprint, jsonify, request
 from sqlalchemy import func, select
 
 from app.db import session_scope
-from app.models import Election, Lga, State
+from app.models import Candidate, Election, Lga, State
 
 bp = Blueprint("overview", __name__, url_prefix="/api/overview")
 
@@ -19,6 +19,7 @@ def overview():
         states_count = session.scalar(select(func.count(State.state_id))) or 0
         lgas_count = session.scalar(select(func.count(Lga.lga_id))) or 0
         elections_count = session.scalar(select(func.count(Election.election_id))) or 0
+        candidates_count = session.scalar(select(func.count(Candidate.candidate_id))) or 0
 
         cycles_query = session.execute(
             select(Election.cycle, func.count(Election.election_id))
@@ -46,6 +47,7 @@ def overview():
                 "states": states_count,
                 "lgas": lgas_count,
                 "elections": elections_count,
+                "candidates": candidates_count,
             },
             "cycles": [{"cycle": c, "elections": n} for c, n in cycles_query],
             "election_types": [{"type": t, "count": n} for t, n in types_query],

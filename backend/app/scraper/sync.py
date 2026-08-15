@@ -308,7 +308,17 @@ def sync_election_structure(
         count = scrape_lga_structure(
             client, session, election=election, state_id=election.state_id
         )
-        election.structure_synced_at = now
+        # Only claim success if geography actually landed. Stamping the
+        # timestamp unconditionally is how 238 elections reported
+        # "structure synced" while the whole country held 7 LGAs — a parser
+        # that silently matched nothing looked identical to a real sync.
+        if count > 0:
+            election.structure_synced_at = now
+        else:
+            log.warning(
+                "structure: election %s state %s returned 0 LGAs — not marking synced",
+                election.election_id, election.state_id,
+            )
         log_phase(
             session,
             phase="structure",
@@ -485,10 +495,11 @@ def sync_election_pus(
     if not election.irev_election_id or election.state_id is None:
         return 0, 0
 
+    # Must have the object-id: /pus rejects the integer ward_id with a 400.
     stmt = (
         select(Ward)
         .join(Lga, Lga.lga_id == Ward.lga_id)
-        .where(Lga.state_id == election.state_id, Ward.irev_ward_id.isnot(None))
+        .where(Lga.state_id == election.state_id, Ward.irev_ward_oid.isnot(None))
         .limit(max_wards * 4)
     )
     candidates = list(session.scalars(stmt))
@@ -512,7 +523,7 @@ def sync_election_pus(
         if already > 0:
             continue
         try:
-            resp = client.pus_for_ward(election.irev_election_id, str(ward.irev_ward_id))
+            resp = client.pus_for_ward(election.irev_election_id, str(ward.irev_ward_oid))
             n = _persist_ward_pu_results(session, election, ward, resp, source_id=source.source_id)
             rows_inserted += n
             log_phase(

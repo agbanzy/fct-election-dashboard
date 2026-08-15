@@ -196,23 +196,51 @@ def scrape_lga_structure(
     for lga_raw in data:
         if not isinstance(lga_raw, dict):
             continue
-        lga_name = lga_raw.get("lga_name") or lga_raw.get("name")
-        irev_lga_id = lga_raw.get("lga_id") or lga_raw.get("_id")
+
+        # Each element is an election↔LGA join row, not the LGA itself: its
+        # top-level `_id` is the join's id and there is no top-level `name`.
+        # The LGA proper is nested under `lga`. Reading the old flat keys
+        # matched nothing, so every LGA was skipped and the whole PU pipeline
+        # downstream had no geography to walk.
+        lga_obj = lga_raw.get("lga")
+        if isinstance(lga_obj, dict):
+            lga_name = lga_obj.get("name") or lga_obj.get("lga_name")
+            irev_lga_id = lga_obj.get("lga_id")
+            lga_oid = lga_obj.get("_id")
+        else:
+            # Tolerate a flat shape in case IReV varies by election type.
+            lga_name = lga_raw.get("lga_name") or lga_raw.get("name")
+            irev_lga_id = lga_raw.get("lga_id")
+            lga_oid = None
+
         if not lga_name:
+            log.warning(
+                "structure: LGA row without a name (election=%s state=%s keys=%s)",
+                election.election_id, state_id, sorted(lga_raw)[:8],
+            )
             continue
+
         lga = upsert_lga(session, state_id, irev_lga_id=_as_int(irev_lga_id), name=lga_name)
+        if lga_oid and not lga.irev_lga_oid:
+            lga.irev_lga_oid = str(lga_oid)
+
         for ward_raw in lga_raw.get("wards") or []:
             if not isinstance(ward_raw, dict):
                 continue
             ward_name = ward_raw.get("ward_name") or ward_raw.get("name")
             if not ward_name:
                 continue
-            upsert_ward(
+            ward = upsert_ward(
                 session,
                 lga,
-                irev_ward_id=_as_int(ward_raw.get("ward_id") or ward_raw.get("_id")),
+                irev_ward_id=_as_int(ward_raw.get("ward_id")),
                 name=ward_name,
             )
+            # The object-id is what /pus keys on — without it the ward is
+            # unreachable no matter how correct the integer id is.
+            oid = ward_raw.get("_id")
+            if oid and ward.irev_ward_oid != str(oid):
+                ward.irev_ward_oid = str(oid)
         count += 1
     return count
 

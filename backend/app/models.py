@@ -86,6 +86,7 @@ class Lga(Base):
         SmallInteger, ForeignKey("states.state_id"), nullable=False
     )
     irev_lga_id: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
+    irev_lga_oid: Mapped[str | None] = mapped_column(Text, nullable=True)
     name: Mapped[str] = mapped_column(Text, nullable=False)
     lga_kind: Mapped[str] = mapped_column(Text, default="lga", nullable=False)  # 'lga'|'area_council'
 
@@ -101,6 +102,8 @@ class Ward(Base):
     ward_id: Mapped[int] = mapped_column(BigInteger, primary_key=True)
     lga_id: Mapped[int] = mapped_column(BigInteger, ForeignKey("lgas.lga_id"), nullable=False)
     irev_ward_id: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
+    # IReV's Mongo `_id`. The /pus endpoint keys on this, not irev_ward_id.
+    irev_ward_oid: Mapped[str | None] = mapped_column(Text, nullable=True)
     name: Mapped[str] = mapped_column(Text, nullable=False)
 
     lga: Mapped[Lga] = relationship(back_populates="wards")

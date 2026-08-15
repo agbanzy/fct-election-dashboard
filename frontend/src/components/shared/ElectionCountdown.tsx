@@ -53,18 +53,10 @@ export default function ElectionCountdown() {
     );
   }
 
-  if (data.status === "live") {
-    return (
-      <div className="rounded-lg border-2 border-accent-red bg-accent-red/10 p-4">
-        <div className="flex items-center gap-2 text-accent-red font-bold">
-          <span className="inline-block w-2 h-2 rounded-full bg-accent-red animate-pulse" />
-          LIVE — {data.election_type_label}
-          {data.state_name ? ` · ${data.state_name}` : ""}
-        </div>
-        <div className="text-xs text-dim mt-1">Scraper running on 2-minute cycle.</div>
-      </div>
-    );
-  }
+  // While an election is live, <LiveElectionPanel> owns the hero — it shows
+  // the same "LIVE" framing plus reporting progress and running tallies.
+  // Rendering both stacked two near-identical banners on polling day.
+  if (data.status === "live") return null;
 
   const seconds = remaining ?? 0;
   const t = format(seconds);

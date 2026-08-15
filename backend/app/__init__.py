@@ -62,6 +62,7 @@ def create_app(config: Config | None = None) -> Flask:
         health,
         live,
         methodology,
+        news,
         overview,
         results,
         scrape,
@@ -94,5 +95,6 @@ def create_app(config: Config | None = None) -> Flask:
     app.register_blueprint(methodology.bp)
     app.register_blueprint(live.bp)
     app.register_blueprint(sync_api.bp)
+    app.register_blueprint(news.bp)
 
     return app
