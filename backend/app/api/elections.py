@@ -190,6 +190,8 @@ def reporting_by_lga(election_id: int):
             )
         out.sort(key=lambda r: (r["pct"] is None, -(r["pct"] or 0)))
 
+        from app.ocr.worker import ocr_progress
+
         return jsonify(
             {
                 "election": _serialize_election(election),
@@ -198,6 +200,9 @@ def reporting_by_lga(election_id: int):
                     "reported_pus": election.uploaded_pus or 0,
                     "walked_pus": sum(expected.values()),
                 },
+                # Machine-reading progress over the published sheets, so the
+                # drain can be watched without tailing worker logs.
+                "ocr": ocr_progress(session, election_id),
                 "by_lga": out,
             }
         )

@@ -124,9 +124,14 @@ workers:
       # Readings are cached permanently per image, so this is a drain rate, not
       # a recurring bill — 0 disables it entirely, and it stays disabled unless
       # ANTHROPIC_API_KEY is also set as a SECRET in the DO console.
+      # 25 sheets per ~120s live tick ≈ 750/hour, so a full state (Osun is
+      # ~3,700 units) drains in roughly four hours without a burst. Safe to
+      # commit non-zero: the reader also requires ANTHROPIC_API_KEY, which is
+      # set as a SECRET in the console and never lives in this file, so
+      # reading stays off until that key exists.
       - key: OCR_SHEETS_PER_TICK
         scope: RUN_TIME
-        value: "0"
+        value: "25"
       - key: LOG_LEVEL
         scope: RUN_TIME
         value: INFO
